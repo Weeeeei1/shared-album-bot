@@ -2222,49 +2222,22 @@ async def view_shared_album(
             return
 
     # 记录访问（如果不是所有者）
+    is_first_visit = False
     if album["owner_id"] != user.id:
-        db.log_access(album_id, user.id)
+        if not db.has_user_viewed(album_id, user.id):
+            db.log_access(album_id, user.id)
+            is_first_visit = True
+            # 发送通知给相册创建者
+            await notify_album_owner(context, album["owner_id"], user, album["name"])
 
-        # 发送通知给相册创建者
-        await notify_album_owner(context, album["owner_id"], user, album["name"])
-
-    # 显示相册预览（带翻页）
+    # 获取所有媒体
     media = db.get_album_media(album_id)
 
     if not media:
         await update.message.reply_text("📭 此相册为空")
         return
 
-    # 显示第一个媒体作为预览（带内容保护，防止转发和保存）
-    current_idx = 0
-    current_media = media[0]
     total = len(media)
-
-    caption = f"""📂 {album["name"]} ({current_idx + 1}/{total})
-
-💬 {current_media["caption"] if current_media["caption"] else "无描述"}
-
-🔒 此内容受保护，无法转发或保存"""
-
-    # 构建导航按钮
-    keyboard = []
-    nav_buttons = []
-
-    if total > 1:
-        nav_buttons.append(
-            InlineKeyboardButton("▶️ 下一张", callback_data=f"shared_next_{album_id}_1")
-        )
-
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-
-    keyboard.append(
-        [
-            InlineKeyboardButton(
-                "🤖 使用机器人创建相册", url=f"https://t.me/{context.bot.username}"
-            )
-        ]
-    )
 
     # 获取内容保护和自动删除设置
     # allow_download: 0=禁止(保护内容), 1=允许(不保护)
@@ -2272,49 +2245,91 @@ async def view_shared_album(
     protect = allow_download == 0  # 禁止下载时启用保护
     auto_delete_seconds = album.get("auto_delete_seconds", 600)
 
-    sent_message = None
+    # 收集发送的消息ID，用于批量删除
+    sent_message_ids = []
 
     try:
-        if current_media["file_type"] == "photo":
-            sent_message = await update.message.reply_photo(
-                photo=current_media["file_id"],
-                caption=caption,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                protect_content=protect,
-            )
-        elif current_media["file_type"] == "video":
-            sent_message = await update.message.reply_video(
-                video=current_media["file_id"],
-                caption=caption,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                protect_content=protect,
-            )
-        else:
-            sent_message = await update.message.reply_document(
-                document=current_media["file_id"],
-                caption=caption,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                protect_content=protect,
-            )
+        # 发送相册标题消息
+        title_message = await update.message.reply_text(
+            f"📂 {album['name']} (共 {total} 个媒体)\n\n🔒 此内容受保护，无法转发或保存"
+        )
+        sent_message_ids.append(title_message.message_id)
 
-        # 如果设置了自动删除，安排定时删除
-        if auto_delete_seconds > 0 and sent_message:
+        # 依次发送所有媒体，添加延迟避免触发限流
+        for idx, media_item in enumerate(media):
+            caption = f"📎 {idx + 1}/{total}\n\n💬 {media_item['caption'] if media_item['caption'] else '无描述'}"
 
-            async def delete_message_after_delay():
+            try:
+                if media_item["file_type"] == "photo":
+                    msg = await update.message.reply_photo(
+                        photo=media_item["file_id"],
+                        caption=caption,
+                        protect_content=protect,
+                    )
+                elif media_item["file_type"] == "video":
+                    msg = await update.message.reply_video(
+                        video=media_item["file_id"],
+                        caption=caption,
+                        protect_content=protect,
+                    )
+                else:
+                    msg = await update.message.reply_document(
+                        document=media_item["file_id"],
+                        caption=caption,
+                        protect_content=protect,
+                    )
+                sent_message_ids.append(msg.message_id)
+
+                # 每发送一条消息后延迟0.5秒，避免触发Telegram限流
+                if idx < total - 1:
+                    await asyncio.sleep(0.5)
+
+            except Exception as e:
+                logger.warning(f"发送媒体 {idx + 1} 失败: {e}")
+                continue
+
+        # 获取当前是第几位观众
+        viewer_count = db.get_unique_viewers_count(album_id)
+
+        # 发送完成提示
+        finish_text = f"✅ 相册「{album['name']}」已全部加载完成！\n\n👀 你是第 {viewer_count} 位观众\n\n⏱️ 内容将在 {auto_delete_seconds // 60} 分钟后自动消失"
+
+        finish_keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "🤖 使用机器人创建相册",
+                        url=f"https://t.me/{context.bot.username}",
+                    )
+                ]
+            ]
+        )
+
+        finish_message = await update.message.reply_text(
+            finish_text, reply_markup=finish_keyboard
+        )
+        sent_message_ids.append(finish_message.message_id)
+
+        # 如果设置了自动删除，安排定时批量删除所有消息
+        if auto_delete_seconds > 0 and sent_message_ids:
+
+            async def delete_all_messages_after_delay():
                 await asyncio.sleep(auto_delete_seconds)
-                try:
-                    await sent_message.delete()
-                except Exception as e:
-                    logger.warning(f"自动删除消息失败: {e}")
+                for msg_id in sent_message_ids:
+                    try:
+                        await context.bot.delete_message(
+                            chat_id=user.id, message_id=msg_id
+                        )
+                    except Exception as e:
+                        logger.warning(f"删除消息 {msg_id} 失败: {e}")
 
-            # 启动后台任务删除消息
-            asyncio.create_task(delete_message_after_delay())
+            # 启动后台任务删除所有消息
+            asyncio.create_task(delete_all_messages_after_delay())
 
     except Exception as e:
-        logger.error(f"发送预览失败: {e}", exc_info=True)
+        logger.error(f"发送相册失败: {e}", exc_info=True)
         await update.message.reply_text(
             f"📂 {album['name']}\n\n📭 加载失败",
-            reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
 
