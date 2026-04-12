@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - PUBLIC_CHANNEL_ID=${PUBLIC_CHANNEL_ID}
+      - PRIVATE_GROUP_ID=${PRIVATE_GROUP_ID}
+      - ADMIN_USER_ID=${ADMIN_USER_ID}
+      - DATABASE_FILE=/data/shared_album_bot.db
+      - LOG_FILE=/data/bot.log
+      - LOG_LEVEL=INFO
+    volumes:
+      - bot_data:/data
+
+volumes:
+  bot_data:

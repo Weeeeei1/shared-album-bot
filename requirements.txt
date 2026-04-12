@@ -1,2 +1,4 @@
 python-telegram-bot==20.7
 python-telegram-bot[job-queue]
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
