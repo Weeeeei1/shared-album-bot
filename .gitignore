@@ -1,0 +1,19 @@
+# 运行时数据
+*.log
+*.db
+*.session
+*.db-journal
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 手动备份文件
+*.bak
+*.backup
+
+# 临时文件
+*.tmp
+.env

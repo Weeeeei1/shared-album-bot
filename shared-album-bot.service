@@ -1,0 +1,17 @@
+[Unit]
+Description=Shared Album Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.openclaw/workspace/shared-album-bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /root/.openclaw/workspace/shared-album-bot/bot.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/shared-album-bot.log
+StandardError=append:/var/log/shared-album-bot.log
+
+[Install]
+WantedBy=multi-user.target
