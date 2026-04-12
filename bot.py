@@ -35,6 +35,22 @@ WAITING_MAX_VIEWERS = 2
 WAITING_EXPIRY = 3
 WAITING_RENAME = 4
 
+# 常量
+MAX_ALBUM_NAME_LENGTH = 50
+MIN_ALBUM_NAME_LENGTH = 1
+
+
+def validate_album_name(name: str) -> tuple:
+    """验证相册名称，返回 (是否有效, 错误消息)"""
+    if not name or not name.strip():
+        return False, "相册名称不能为空"
+    name = name.strip()
+    if len(name) > MAX_ALBUM_NAME_LENGTH:
+        return False, f"相册名称不能超过{MAX_ALBUM_NAME_LENGTH}个字符"
+    if len(name) < MIN_ALBUM_NAME_LENGTH:
+        return False, "相册名称不能为空"
+    return True, name
+
 
 def get_user_info(user) -> str:
     """获取用户信息显示"""
@@ -83,7 +99,7 @@ async def notify_album_owner(
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"发送访问通知失败: {error_msg}")
+        logger.error(f"发送访问通知失败: {error_msg}", exc_info=True)
 
         # 如果是权限问题（用户未启动机器人），记录特殊日志
         if (
@@ -112,7 +128,7 @@ async def check_channel_membership(
         member = await context.bot.get_chat_member(config.PUBLIC_CHANNEL_ID, user_id)
         return member.status in ["member", "administrator", "creator"]
     except Exception as e:
-        logger.error(f"检查频道成员状态失败: {e}")
+        logger.error(f"检查频道成员状态失败: {e}", exc_info=True)
         return False
 
 
@@ -137,7 +153,8 @@ async def require_channel_membership(
                 chat.invite_link
                 or f"https://t.me/c/{str(config.PUBLIC_CHANNEL_ID)[4:]}"
             )
-        except:
+        except Exception as e:
+            logger.warning(f"获取频道信息失败: {e}")
             channel_title = "公开频道"
             channel_link = f"https://t.me/c/{str(config.PUBLIC_CHANNEL_ID)[4:]}"
 
@@ -244,7 +261,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat.invite_link
                     or f"https://t.me/c/{str(config.PUBLIC_CHANNEL_ID)[4:]}"
                 )
-            except:
+            except Exception as e:
+                logger.warning(f"获取频道信息失败: {e}")
                 channel_title = "公开频道"
                 channel_link = f"https://t.me/c/{str(config.PUBLIC_CHANNEL_ID)[4:]}"
 
@@ -330,8 +348,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "batch_timer" in context.user_data:
             try:
                 context.user_data["batch_timer"].cancel()
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"取消定时器失败: {e}")
 
         # 设置新的定时器，2秒后处理批量上传
         async def process_batch():
@@ -341,7 +359,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["batch_timer"] = asyncio.create_task(process_batch())
 
     except Exception as e:
-        logger.error(f"处理媒体时出错: {e}")
+        logger.error(f"处理媒体时出错: {e}", exc_info=True)
         await message.reply_text("❌ 处理失败，请重试")
 
 
@@ -469,7 +487,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat.invite_link
                     or f"https://t.me/c/{str(config.PUBLIC_CHANNEL_ID)[4:]}"
                 )
-            except:
+            except Exception as e:
+                logger.warning(f"获取频道信息失败: {e}")
                 channel_title = "公开频道"
                 channel_link = f"https://t.me/c/{str(config.PUBLIC_CHANNEL_ID)[4:]}"
 
@@ -487,7 +506,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(
                     message, reply_markup=InlineKeyboardMarkup(keyboard)
                 )
-            except:
+            except Exception as e:
+                logger.warning(f"编辑消息失败，发送新消息: {e}")
                 await context.bot.send_message(
                     chat_id=user.id,
                     text=message,
@@ -510,12 +530,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"👋 你好 {user.first_name}！\n\n欢迎使用共享相册机器人 🤖\n\n👇 选择功能",
                 reply_markup=get_main_menu_keyboard(),
             )
-        except:
+        except Exception as e:
+            logger.warning(f"编辑主菜单消息失败: {e}")
             # 如果编辑失败（当前是媒体消息），删除后发送新消息
             try:
                 await query.message.delete()
-            except:
-                pass
+            except Exception as e2:
+                logger.warning(f"删除消息失败: {e2}")
             await context.bot.send_message(
                 chat_id=user.id,
                 text=f"👋 你好 {user.first_name}！\n\n欢迎使用共享相册机器人 🤖\n\n👇 选择功能",
@@ -916,7 +937,7 @@ async def publish_batch_media(
                 public_count += 1
 
             except Exception as e:
-                logger.error(f"批量提交审核时出错: {e}")
+                logger.error(f"批量提交审核时出错: {e}", exc_info=True)
 
     # 清理临时数据
     context.user_data.pop("pending_media_list", None)
@@ -1061,7 +1082,7 @@ async def publish_media(
             )
 
         except Exception as e:
-            logger.error(f"提交审核时出错: {e}")
+            logger.error(f"提交审核时出错: {e}", exc_info=True)
             await query.edit_message_text(
                 "✅ 已保存到私有相册！\n❌ 提交审核失败",
                 reply_markup=get_main_menu_keyboard(),
@@ -1096,12 +1117,13 @@ async def show_albums_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "📭 你还没有相册\n\n创建一个来开始整理你的媒体文件吧！",
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
-        except:
+        except Exception as e:
+            logger.warning(f"编辑空相册列表消息失败: {e}")
             # 如果编辑失败（当前是媒体消息），删除后发送新消息
             try:
                 await query.message.delete()
-            except:
-                pass
+            except Exception as e2:
+                logger.warning(f"删除消息失败: {e2}")
             await context.bot.send_message(
                 chat_id=user.id,
                 text="📭 你还没有相册\n\n创建一个来开始整理你的媒体文件吧！",
@@ -1131,12 +1153,13 @@ async def show_albums_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📁 我的相册 (共{len(albums)}个)\n\n点击相册查看详情",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
-    except:
+    except Exception as e:
+        logger.warning(f"编辑相册列表消息失败: {e}")
         # 如果编辑失败（当前是媒体消息），删除后发送新消息
         try:
             await query.message.delete()
-        except:
-            pass
+        except Exception as e2:
+            logger.warning(f"删除消息失败: {e2}")
         await context.bot.send_message(
             chat_id=user.id,
             text=f"📁 我的相册 (共{len(albums)}个)\n\n点击相册查看详情",
@@ -1239,8 +1262,8 @@ async def show_album_details(
         # 删除原消息，发送媒体
         try:
             await query.message.delete()
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"删除原消息失败: {e}")
 
         try:
             if current_media["file_type"] == "photo":
@@ -1265,7 +1288,7 @@ async def show_album_details(
                     reply_markup=InlineKeyboardMarkup(keyboard),
                 )
         except Exception as e:
-            logger.error(f"发送预览失败: {e}")
+            logger.error(f"发送预览失败: {e}", exc_info=True)
             await context.bot.send_message(
                 chat_id=user.id,
                 text=caption,
@@ -1419,8 +1442,8 @@ async def show_preview(
         # 删除原消息
         try:
             await query.message.delete()
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"删除原消息失败: {e}")
 
         # 获取自动删除设置（仅对访客有效）
         auto_delete_seconds = (
@@ -1472,7 +1495,7 @@ async def show_preview(
             asyncio.create_task(delete_message_after_delay())
 
     except Exception as e:
-        logger.error(f"发送预览失败: {e}")
+        logger.error(f"发送预览失败: {e}", exc_info=True)
         await query.answer("加载失败，请重试", show_alert=True)
 
 
@@ -1491,8 +1514,14 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
         return  # 不在等待输入状态
 
     if waiting_for == "album_name":
+        # 验证相册名称
+        is_valid, result = validate_album_name(text)
+        if not is_valid:
+            await update.message.reply_text(f"❌ {result}")
+            return
+
         # 创建相册
-        album_id = db.create_album(user.id, text)
+        album_id = db.create_album(user.id, result)
         context.user_data.pop("waiting_for", None)
 
         keyboard = [
@@ -1510,23 +1539,35 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
 
         await update.message.reply_text(
-            f"✅ 相册创建成功！\n\n📁 名称: {text}\n🆔 ID: {album_id}",
+            f"✅ 相册创建成功！\n\n📁 名称: {result}\n🆔 ID: {album_id}",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
     elif waiting_for == "new_album_for_media":
+        # 验证相册名称
+        is_valid, result = validate_album_name(text)
+        if not is_valid:
+            await update.message.reply_text(f"❌ {result}")
+            return
+
         # 创建新相册用于保存当前媒体
-        album_id = db.create_album(user.id, text)
+        album_id = db.create_album(user.id, result)
         context.user_data["selected_album_id"] = album_id
         context.user_data.pop("waiting_for", None)
 
         await ask_public_or_private(update, context)
 
     elif waiting_for == "album_rename":
+        # 验证相册名称
+        is_valid, result = validate_album_name(text)
+        if not is_valid:
+            await update.message.reply_text(f"❌ {result}")
+            return
+
         # 重命名相册
         album_id = context.user_data.get("rename_album_id")
         if album_id:
-            db.rename_album(album_id, text)
+            db.rename_album(album_id, result)
             context.user_data.pop("waiting_for", None)
             context.user_data.pop("rename_album_id", None)
 
@@ -1540,14 +1581,20 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
             ]
 
             await update.message.reply_text(
-                f"✅ 相册已重命名为: {text}",
+                f"✅ 相册已重命名为: {result}",
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
 
     # ========== 批量创建相册 ==========
     elif waiting_for == "batch_new_album":
+        # 验证相册名称
+        is_valid, result = validate_album_name(text)
+        if not is_valid:
+            await update.message.reply_text(f"❌ {result}")
+            return
+
         # 批量创建新相册
-        album_id = db.create_album(user.id, text)
+        album_id = db.create_album(user.id, result)
         context.user_data.pop("waiting_for", None)
 
         # 批量保存到新建的相册
@@ -1682,7 +1729,7 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
                 success_count += 1
             except Exception as e:
-                logger.error(f"广播给用户 {u['user_id']} 失败: {e}")
+                logger.error(f"广播给用户 {u['user_id']} 失败: {e}", exc_info=True)
                 fail_count += 1
 
         # 发送结果
@@ -1810,12 +1857,13 @@ async def confirm_delete_media(
             caption=f"⚠️ 确定要删除这张媒体吗？\n\n此操作不可恢复。",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
-    except:
+    except Exception as e:
+        logger.warning(f"编辑删除确认消息失败: {e}")
         # 如果编辑失败，发送新消息
         try:
             await query.message.delete()
-        except:
-            pass
+        except Exception as e2:
+            logger.warning(f"删除消息失败: {e2}")
         await context.bot.send_message(
             chat_id=user.id,
             text="⚠️ 确定要删除这张媒体吗？\n\n此操作不可恢复。",
@@ -1896,11 +1944,12 @@ async def show_share_options(
             text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard)
         )
     except Exception as e:
+        logger.warning(f"编辑分享消息失败: {e}")
         # 删除原消息并发送新消息
         try:
             await query.message.delete()
-        except:
-            pass
+        except Exception as e2:
+            logger.warning(f"删除消息失败: {e2}")
 
         await context.bot.send_message(
             chat_id=user.id,
@@ -1921,8 +1970,12 @@ async def show_access_logs(
     if not album or (album["owner_id"] != user.id and not is_admin(user.id)):
         try:
             await query.edit_message_text("❌ 无权访问")
-        except:
-            await query.message.delete()
+        except Exception as e:
+            logger.warning(f"编辑无权访问消息失败: {e}")
+            try:
+                await query.message.delete()
+            except Exception as e2:
+                logger.warning(f"删除消息失败: {e2}")
             await context.bot.send_message(chat_id=user.id, text="❌ 无权访问")
         return
 
@@ -1961,11 +2014,12 @@ async def show_access_logs(
 
     try:
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    except:
+    except Exception as e:
+        logger.warning(f"编辑访问日志消息失败: {e}")
         try:
             await query.message.delete()
-        except:
-            pass
+        except Exception as e2:
+            logger.warning(f"删除消息失败: {e2}")
         await context.bot.send_message(
             chat_id=user.id, text=text, reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -2035,11 +2089,12 @@ async def show_album_settings(
 
     try:
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    except:
+    except Exception as e:
+        logger.warning(f"编辑相册设置消息失败: {e}")
         try:
             await query.message.delete()
-        except:
-            pass
+        except Exception as e2:
+            logger.warning(f"删除消息失败: {e2}")
         await context.bot.send_message(
             chat_id=user.id, text=text, reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -2256,7 +2311,7 @@ async def view_shared_album(
             asyncio.create_task(delete_message_after_delay())
 
     except Exception as e:
-        logger.error(f"发送预览失败: {e}")
+        logger.error(f"发送预览失败: {e}", exc_info=True)
         await update.message.reply_text(
             f"📂 {album['name']}\n\n📭 加载失败",
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -2334,8 +2389,8 @@ async def approve_review(
                 chat_id=review["user_id"],
                 text="✅ 你的媒体已通过审核并发布到公开频道！",
             )
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"通知用户审核通过失败: {e}")
 
         # 更新审核消息
         try:
@@ -2351,11 +2406,13 @@ async def approve_review(
                     ]
                 ),
             )
-        except:
+        except Exception as e:
+            logger.warning(f"编辑审核通过消息失败: {e}")
+            await query.answer("✅ 已通过", show_alert=True)
             await query.answer("✅ 已通过", show_alert=True)
 
     except Exception as e:
-        logger.error(f"审核通过时出错: {e}")
+        logger.error(f"审核通过时出错: {e}", exc_info=True)
         await query.answer(f"❌ 发布失败: {e}", show_alert=True)
 
 
@@ -2393,8 +2450,8 @@ async def reject_review(
                 chat_id=review["user_id"],
                 text="❌ 你的媒体未通过审核，未发布到公开频道。",
             )
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"通知用户审核拒绝失败: {e}")
 
         # 更新审核消息
         try:
@@ -2410,11 +2467,12 @@ async def reject_review(
                     ]
                 ),
             )
-        except:
+        except Exception as e:
+            logger.warning(f"编辑审核拒绝消息失败: {e}")
             await query.answer("❌ 已拒绝", show_alert=True)
 
     except Exception as e:
-        logger.error(f"审核拒绝时出错: {e}")
+        logger.error(f"审核拒绝时出错: {e}", exc_info=True)
         await query.answer(f"❌ 操作失败: {e}", show_alert=True)
 
 
@@ -2450,12 +2508,13 @@ async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    except:
+    except Exception as e:
+        logger.warning(f"编辑统计消息失败: {e}")
         # 如果编辑失败（当前是媒体消息），删除后发送新消息
         try:
             await query.message.delete()
-        except:
-            pass
+        except Exception as e2:
+            logger.warning(f"删除消息失败: {e2}")
         await context.bot.send_message(
             chat_id=user.id, text=text, reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -2494,12 +2553,13 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             help_text, reply_markup=InlineKeyboardMarkup(keyboard)
         )
-    except:
+    except Exception as e:
+        logger.warning(f"编辑帮助消息失败: {e}")
         # 如果编辑失败（当前是媒体消息），删除后发送新消息
         try:
             await query.message.delete()
-        except:
-            pass
+        except Exception as e2:
+            logger.warning(f"删除消息失败: {e2}")
         await context.bot.send_message(
             chat_id=user.id, text=help_text, reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -2766,7 +2826,7 @@ async def show_admin_maintenance(update: Update, context: ContextTypes.DEFAULT_T
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """错误处理"""
-    logger.error(f"更新 {update} 导致错误: {context.error}")
+    logger.error(f"更新 {update} 导致错误: {context.error}", exc_info=True)
 
 
 # ========== 主程序 ==========

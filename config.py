@@ -29,12 +29,12 @@ def _get_env(key: str, default, cast_type=None):
 # Bot Token - 必须设置
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
-# 频道/群组配置
-PUBLIC_CHANNEL_ID = _get_env("PUBLIC_CHANNEL_ID", -1003741187478, int)
-PRIVATE_GROUP_ID = _get_env("PRIVATE_GROUP_ID", -1003194472806, int)
+# 频道/群组配置（必须设置，无默认值）
+PUBLIC_CHANNEL_ID = _get_env("PUBLIC_CHANNEL_ID", None, int)
+PRIVATE_GROUP_ID = _get_env("PRIVATE_GROUP_ID", None, int)
 
-# 管理员配置
-ADMIN_USER_ID = _get_env("ADMIN_USER_ID", 1561094737, int)
+# 管理员配置（必须设置，无默认值）
+ADMIN_USER_ID = _get_env("ADMIN_USER_ID", None, int)
 
 # 数据库配置
 DATABASE_FILE = os.environ.get("DATABASE_FILE", "shared_album_bot.db")
