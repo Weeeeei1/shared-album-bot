@@ -614,12 +614,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         album_id = int(data.split("_")[2])
         await view_full_album(update, context, album_id)
 
+    elif data == "my_fans_menu":
+        await show_fans_menu(update, context)
+
     elif data.startswith("my_fans_"):
         album_id = int(data.split("_")[2])
         await show_my_fans(update, context, album_id)
-
-    elif data == "my_fans_menu":
-        await show_fans_menu(update, context)
 
     elif data == "broadcast_start":
         await start_broadcast_publisher(update, context)
