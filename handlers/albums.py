@@ -491,3 +491,89 @@ async def block_user_from_album(
 
     # 刷新访问日志
     await show_access_logs(update, context, album_id)
+
+
+# -------------- 新增的相册操作函数 --------------
+
+
+async def start_create_album(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """开始创建相册流程"""
+    query = update.callback_query
+
+    context.user_data["waiting_for"] = "album_name"
+
+    await query.edit_message_text(
+        "➕ 创建新相册\n\n请发送相册名称：",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("« 取消", callback_data="menu_albums")]]
+        ),
+    )
+
+
+async def start_rename_album(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, album_id: int
+):
+    """开始重命名相册"""
+    query = update.callback_query
+
+    context.user_data["waiting_for"] = "album_rename"
+    context.user_data["rename_album_id"] = album_id
+
+    album = db.get_album(album_id)
+
+    await query.edit_message_text(
+        f"✏️ 重命名相册\n\n当前名称: {album['name']}\n\n请发送新名称：",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("« 取消", callback_data=f"view_album_{album_id}")]]
+        ),
+    )
+
+
+async def confirm_delete_album(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, album_id: int
+):
+    """确认删除相册"""
+    query = update.callback_query
+
+    album = db.get_album(album_id)
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "✅ 确认删除", callback_data=f"confirm_delete_{album_id}"
+            ),
+            InlineKeyboardButton("❌ 取消", callback_data=f"view_album_{album_id}"),
+        ]
+    ]
+
+    await query.edit_message_text(
+        f'⚠️ 确定要删除相册 "{album["name"]}" 吗？\n\n'
+        f"注意：这只会删除数据库记录，不会删除Telegram上的媒体文件。",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+
+async def execute_delete_album(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, album_id: int
+):
+    """执行删除相册"""
+    query = update.callback_query
+    user = update.effective_user
+
+    album = db.get_album(album_id)
+    if not album or album["owner_id"] != user.id:
+        await query.edit_message_text(
+            "❌ 删除失败",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("« 返回", callback_data="menu_albums")]]
+            ),
+        )
+        return
+
+    db.delete_album(album_id)
+    await query.edit_message_text(
+        "✅ 相册已删除",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("« 返回相册列表", callback_data="menu_albums")]]
+        ),
+    )

@@ -22,6 +22,47 @@ import config
 from database import db
 from utils import task_manager, rate_limiter
 
+# --- Import modularized handlers to enable module-based bot architecture ---
+# The following imports allow the bot to import behavior from handlers/ modules
+# and avoid keeping all logic in this single file.
+try:
+    from handlers.albums import (
+        start_create_album,
+        start_rename_album,
+        confirm_delete_album,
+        execute_delete_album,
+        start_set_limit,
+        block_user_from_album,
+    )
+    from handlers.media_ops import (
+        show_preview,
+        confirm_delete_media,
+        execute_delete_media,
+    )
+    from handlers.admin import (
+        view_shared_album,
+        approve_review,
+        reject_review,
+        show_stats,
+        show_help,
+        show_admin_menu,
+        show_admin_stats,
+        show_admin_users,
+        show_admin_pending,
+        show_admin_settings,
+        set_public_channel,
+        set_private_group,
+        start_broadcast,
+        show_admin_maintenance,
+        preview_review,
+        batch_approve_all,
+        batch_reject_all,
+    )
+except Exception:
+    # In case of import-time circulars during initial boot, we still allow the script to run
+    # by falling back to local definitions (these will be overwritten once init completes).
+    pass
+
 # 设置日志
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -3968,3 +4009,97 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Overwrite module-level functions with modular handler implementations
+# This enables importing handlers directly from bot while maintaining
+# backward compatibility with existing code structure.
+try:
+    # Channel membership
+    from handlers.channel import (
+        check_channel_membership,
+        require_channel_membership,
+    )
+
+    # Core utilities
+    from handlers.core import (
+        get_main_menu_keyboard,
+        is_admin,
+        validate_album_name,
+        get_user_info,
+        notify_album_owner,
+    )
+
+    # Album operations
+    from handlers.albums import (
+        show_albums_list,
+        show_album_details,
+        show_share_options,
+        show_access_logs,
+        show_album_settings,
+        start_create_album,
+        start_rename_album,
+        confirm_delete_album,
+        execute_delete_album,
+        start_set_limit,
+        block_user_from_album,
+    )
+
+    # Media operations
+    from handlers.media import (
+        handle_media,
+        show_album_selection,
+        show_batch_album_selection,
+        process_batch_save,
+        publish_batch_media,
+        ask_public_or_private,
+        publish_media,
+        process_caption_media,
+        publish_caption_media,
+        use_default_caption,
+        start_custom_caption_input,
+        select_album_for_caption,
+    )
+
+    # Media preview/delete
+    from handlers.media_ops import (
+        show_preview,
+        confirm_delete_media,
+        execute_delete_media,
+    )
+
+    # Follower system
+    from handlers.followers import (
+        follow_publisher,
+        unfollow_publisher,
+        view_new_content,
+        view_full_album,
+        notify_followers,
+        show_fans_menu,
+        show_my_fans,
+        start_broadcast_publisher,
+        confirm_broadcast,
+        cancel_broadcast,
+    )
+
+    # Admin functions
+    from handlers.admin import (
+        view_shared_album,
+        approve_review,
+        reject_review,
+        show_stats,
+        show_help,
+        show_admin_menu,
+        show_admin_stats,
+        show_admin_users,
+        show_admin_pending,
+        show_admin_settings,
+        set_public_channel,
+        set_private_group,
+        start_broadcast,
+        show_admin_maintenance,
+        preview_review,
+        batch_approve_all,
+        batch_reject_all,
+    )
+except Exception as e:
+    logger.error(f"Failed to import handlers: {e}")
