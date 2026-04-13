@@ -4300,7 +4300,6 @@ try:
 
     # Media operations
     from handlers.media import (
-        handle_media,
         show_album_selection,
         show_batch_album_selection,
         process_batch_save,
