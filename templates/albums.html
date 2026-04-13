@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}相册管理 - Admin Panel{% endblock %}
+
+{% block content %}
+<h1>📁 相册管理</h1>
+
+<div class="card">
+    <h2>相册列表 (共 {{ total }} 个)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>相册名</th>
+                <th>所有者</th>
+                <th>媒体</th>
+                <th>访问</th>
+                <th>创建时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for album in albums %}
+            <tr>
+                <td>{{ album.name }}</td>
+                <td>
+                    {% if album.username %}@{{ album.username }}{% else %}{{ album.owner_name }}{% endif %}
+                    <br><small>(ID: {{ album.owner_id }})</small>
+                </td>
+                <td>{{ album.media_count }}</td>
+                <td>{{ album.view_count }}</td>
+                <td>{{ album.created_at[:10] }}</td>
+                <td>
+                    <button onclick="deleteAlbum({{ album.album_id }})" class="btn btn-danger btn-sm">删除</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <div class="pagination">
+        {% if page > 0 %}
+        <a href="{{ url_for('albums', page=page-1) }}">◀️ 上一页</a>
+        {% else %}
+        <a class="disabled">◀️ 上一页</a>
+        {% endif %}
+        <span style="padding: 0.5rem;">第 {{ page + 1 }} 页</span>
+        {% if (page + 1) * page_size < total %}
+        <a href="{{ url_for('albums', page=page+1) }}">下一页 ▶️</a>
+        {% else %}
+        <a class="disabled">下一页 ▶️</a>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function deleteAlbum(albumId) {
+    if (!confirm('确定要删除这个相册吗？此操作不可恢复！')) return;
+    fetch('/albums/' + albumId + '/delete', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                alert('相册已删除');
+                location.reload();
+            } else {
+                alert('删除失败: ' + d.error);
+            }
+        });
+}
+</script>
+{% endblock %}

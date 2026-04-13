@@ -950,6 +950,42 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "batch_reject_all":
         await batch_reject_all(update, context)
 
+    # ========== 新增管理员功能 ==========
+    elif data == "admin_health":
+        await show_system_health(update, context)
+
+    elif data.startswith("admin_albums_"):
+        page = int(data.split("_")[2])
+        await show_all_albums(update, context, page)
+
+    elif data.startswith("force_delete_album_"):
+        album_id = int(data.split("_")[3])
+        await force_delete_album_admin(update, context, album_id)
+
+    elif data.startswith("admin_content_"):
+        parts = data.split("_")
+        status = parts[2]
+        page = int(parts[3])
+        await show_all_content(update, context, status, page)
+
+    elif data.startswith("admin_user_detail_"):
+        user_id = int(data.split("_")[3])
+        await show_admin_user_detail(update, context, user_id)
+
+    elif data.startswith("delete_user_content_"):
+        user_id = int(data.split("_")[3])
+        await start_delete_user_content(update, context, user_id)
+
+    elif data.startswith("confirm_delete_user_"):
+        user_id = int(data.split("_")[3])
+        await confirm_delete_user_content(update, context, user_id)
+
+    elif data == "cleanup_expired_albums":
+        await cleanup_expired_albums_admin(update, context)
+
+    elif data == "show_detailed_stats":
+        await show_admin_stats(update, context)
+
 
 async def preview_review(
     update: Update, context: ContextTypes.DEFAULT_TYPE, review_id: int
@@ -4100,6 +4136,14 @@ try:
         preview_review,
         batch_approve_all,
         batch_reject_all,
+        show_system_health,
+        show_all_albums,
+        force_delete_album_admin,
+        show_all_content,
+        show_admin_user_detail,
+        start_delete_user_content,
+        confirm_delete_user_content,
+        cleanup_expired_albums_admin,
     )
 except Exception as e:
     logger.error(f"Failed to import handlers: {e}")

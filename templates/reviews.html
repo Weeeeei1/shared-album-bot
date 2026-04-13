@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}审核队列 - Admin Panel{% endblock %}
+
+{% block content %}
+<h1>📋 审核队列</h1>
+
+<div class="card">
+    <h2>待审核内容 (共 {{ reviews|length }} 条)</h2>
+    
+    <div class="actions" style="margin-bottom: 1rem;">
+        <button onclick="batchApprove()" class="btn btn-success">✅ 批量通过</button>
+        <button onclick="batchReject()" class="btn btn-danger">❌ 批量拒绝</button>
+    </div>
+    
+    {% if reviews %}
+    <table>
+        <thead>
+            <tr>
+                <th><input type="checkbox" id="selectAll"></th>
+                <th>ID</th>
+                <th>类型</th>
+                <th>用户</th>
+                <th>相册</th>
+                <th>描述</th>
+                <th>时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in reviews %}
+            <tr>
+                <td><input type="checkbox" class="review-check" value="{{ r.review_id }}"></td>
+                <td>{{ r.review_id }}</td>
+                <td>{{ r.file_type }}</td>
+                <td>
+                    {% if r.username %}@{{ r.username }}{% else %}{{ r.first_name }}{% endif %}
+                    <br><small>(ID: {{ r.user_id }})</small>
+                </td>
+                <td>{{ r.album_name }}</td>
+                <td>{{ r.caption[:30] if r.caption else '无' }}{% if r.caption and r.caption|length > 30 %}...{% endif %}</td>
+                <td>{{ r.created_at[:16] }}</td>
+                <td>
+                    <button onclick="approveReview({{ r.review_id }})" class="btn btn-success btn-sm">通过</button>
+                    <button onclick="rejectReview({{ r.review_id }})" class="btn btn-danger btn-sm">拒绝</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="text-align: center; padding: 2rem; color: #666;">🎉 没有待审核的内容！</p>
+    {% endif %}
+</div>
+
+<script>
+document.getElementById('selectAll').addEventListener('change', function() {
+    document.querySelectorAll('.review-check').forEach(cb => cb.checked = this.checked);
+});
+
+function getSelectedIds() {
+    return Array.from(document.querySelectorAll('.review-check:checked')).map(cb => cb.value);
+}
+
+function approveReview(id) {
+    fetch('/reviews/' + id + '/approve', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                alert('已通过审核');
+                location.reload();
+            } else {
+                alert('操作失败: ' + d.error);
+            }
+        });
+}
+
+function rejectReview(id) {
+    if (!confirm('确定要拒绝这条内容吗？')) return;
+    fetch('/reviews/' + id + '/reject', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                alert('已拒绝');
+                location.reload();
+            } else {
+                alert('操作失败: ' + d.error);
+            }
+        });
+}
+
+function batchApprove() {
+    const ids = getSelectedIds();
+    if (ids.length === 0) { alert('请先选择内容'); return; }
+    if (!confirm('确定要通过选中的 ' + ids.length + ' 条内容吗？')) return;
+    Promise.all(ids.map(id => fetch('/reviews/' + id + '/approve', { method: 'POST' })))
+        .then(() => { alert('已批量通过'); location.reload(); });
+}
+
+function batchReject() {
+    const ids = getSelectedIds();
+    if (ids.length === 0) { alert('请先选择内容'); return; }
+    if (!confirm('确定要拒绝选中的 ' + ids.length + ' 条内容吗？')) return;
+    Promise.all(ids.map(id => fetch('/reviews/' + id + '/reject', { method: 'POST' })))
+        .then(() => { alert('已批量拒绝'); location.reload(); });
+}
+</script>
+{% endblock %}

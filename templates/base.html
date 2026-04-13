@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Admin Panel{% endblock %}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+        .navbar { background: #2c3e50; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+        .navbar h1 { font-size: 1.2rem; }
+        .navbar a { color: white; text-decoration: none; padding: 0.5rem 1rem; border-radius: 4px; }
+        .navbar a:hover { background: #34495e; }
+        .container { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+        .card { background: white; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { margin-bottom: 1rem; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+        .stat-box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 8px; text-align: center; }
+        .stat-box.warning { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .stat-box.success { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .stat-box .number { font-size: 2rem; font-weight: bold; }
+        .stat-box .label { opacity: 0.9; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; font-weight: 600; }
+        tr:hover { background: #f8f9fa; }
+        .btn { padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn-success { background: #2ecc71; color: white; }
+        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.875rem; }
+        .btn:hover { opacity: 0.9; }
+        .pagination { display: flex; justify-content: center; gap: 0.5rem; margin-top: 1rem; }
+        .pagination a { padding: 0.5rem 1rem; background: #3498db; color: white; border-radius: 4px; text-decoration: none; }
+        .pagination a.disabled { background: #ccc; pointer-events: none; }
+        .alert { padding: 1rem; background: #fff3cd; border-left: 4px solid #ffc107; margin-bottom: 1rem; }
+        .error { background: #f8d7da; border-left-color: #dc3545; }
+        .success { background: #d4edda; border-left-color: #28a745; }
+        .actions { display: flex; gap: 0.5rem; }
+        .nav-menu { display: flex; gap: 0.5rem; }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <h1>📊 相册管理后台</h1>
+        <div class="nav-menu">
+            <a href="{{ url_for('dashboard') }}">📈 概览</a>
+            <a href="{{ url_for('users') }}">👥 用户</a>
+            <a href="{{ url_for('albums') }}">📁 相册</a>
+            <a href="{{ url_for('content') }}">🖼️ 内容</a>
+            <a href="{{ url_for('reviews') }}">📋 审核</a>
+            <a href="{{ url_for('logout') }}">退出</a>
+        </div>
+    </nav>
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div class="alert {{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

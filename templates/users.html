@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}用户管理 - Admin Panel{% endblock %}
+
+{% block content %}
+<h1>👥 用户管理</h1>
+
+<div class="card">
+    <h2>用户列表 (共 {{ total }} 个)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>用户ID</th>
+                <th>用户名</th>
+                <th>名称</th>
+                <th>相册</th>
+                <th>媒体</th>
+                <th>注册时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+            <tr>
+                <td>{{ u.user_id }}</td>
+                <td>{% if u.username %}@{{ u.username }}{% else %}-{% endif %}</td>
+                <td>{{ u.first_name }} {{ u.last_name or '' }}</td>
+                <td>{{ u.albums_count }}</td>
+                <td>{{ u.media_count }}</td>
+                <td>{{ u.created_at[:10] }}</td>
+                <td>
+                    <a href="{{ url_for('user_detail', user_id=u.user_id) }}" class="btn btn-primary btn-sm">查看</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <div class="pagination">
+        {% if page > 0 %}
+        <a href="{{ url_for('users', page=page-1) }}">◀️ 上一页</a>
+        {% else %}
+        <a class="disabled">◀️ 上一页</a>
+        {% endif %}
+        <span style="padding: 0.5rem;">第 {{ page + 1 }} 页</span>
+        {% if (page + 1) * page_size < total %}
+        <a href="{{ url_for('users', page=page+1) }}">下一页 ▶️</a>
+        {% else %}
+        <a class="disabled">下一页 ▶️</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

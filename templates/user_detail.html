@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}用户详情 - Admin Panel{% endblock %}
+
+{% block content %}
+<h1>👤 用户详情</h1>
+
+<div class="card">
+    <h2>基本信息</h2>
+    <table>
+        <tr>
+            <td style="width: 150px;"><strong>用户ID</strong></td>
+            <td>{{ user.user_id }}</td>
+        </tr>
+        <tr>
+            <td><strong>用户名</strong></td>
+            <td>{% if user.username %}@{{ user.username }}{% else %}-{% endif %}</td>
+        </tr>
+        <tr>
+            <td><strong>名称</strong></td>
+            <td>{{ user.first_name }} {{ user.last_name or '' }}</td>
+        </tr>
+        <tr>
+            <td><strong>注册时间</strong></td>
+            <td>{{ user.created_at }}</td>
+        </tr>
+        <tr>
+            <td><strong>最后活跃</strong></td>
+            <td>{{ user.last_active }}</td>
+        </tr>
+    </table>
+</div>
+
+<div class="card">
+    <h2>统计信息</h2>
+    <div class="stats-grid">
+        <div class="stat-box">
+            <div class="number">{{ albums_count }}</div>
+            <div class="label">相册数</div>
+        </div>
+        <div class="stat-box">
+            <div class="number">{{ media_count }}</div>
+            <div class="label">媒体数</div>
+        </div>
+        <div class="stat-box">
+            <div class="number">{{ total_views }}</div>
+            <div class="label">总访问</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>相册列表</h2>
+    {% if albums %}
+    <table>
+        <thead>
+            <tr>
+                <th>相册名</th>
+                <th>媒体数</th>
+                <th>创建时间</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for album in albums %}
+            <tr>
+                <td>{{ album.name }}</td>
+                <td>{{ db.get_album_media(album.album_id)|length }}</td>
+                <td>{{ album.created_at[:10] }}</td>
+                <td>
+                    <button onclick="deleteAlbum({{ album.album_id }})" class="btn btn-danger btn-sm">删除</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>该用户没有相册</p>
+    {% endif %}
+</div>
+
+<div class="card" style="background: #fff3cd; border-left: 4px solid #ffc107;">
+    <h2 style="color: #856404;">⚠️ 危险操作</h2>
+    <p style="margin-bottom: 1rem;">删除用户将同时删除该用户的所有相册和媒体，此操作不可恢复！</p>
+    <button onclick="deleteUser()" class="btn btn-danger">🗑️ 删除该用户所有内容</button>
+    <a href="{{ url_for('users') }}" class="btn btn-primary" style="margin-left: 1rem;">返回列表</a>
+</div>
+
+<script>
+function deleteAlbum(albumId) {
+    if (!confirm('确定要删除这个相册吗？此操作不可恢复！')) return;
+    fetch('/albums/' + albumId + '/delete', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                alert('相册已删除');
+                location.reload();
+            } else {
+                alert('删除失败: ' + d.error);
+            }
+        });
+}
+
+function deleteUser() {
+    if (!confirm('确定要删除该用户的所有内容吗？此操作不可恢复！')) return;
+    if (!confirm('再次确认：此操作将删除该用户的所有相册和媒体！')) return;
+    fetch('/users/{{ user.user_id }}/delete', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                alert('已删除 ' + d.albums_deleted + ' 个相册和 ' + d.media_deleted + ' 个媒体');
+                location.href = '{{ url_for("users") }}';
+            } else {
+                alert('删除失败: ' + d.error);
+            }
+        });
+}
+</script>
+{% endblock %}

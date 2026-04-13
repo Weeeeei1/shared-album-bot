@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}概览 - Admin Panel{% endblock %}
+
+{% block content %}
+<h1>📈 系统概览</h1>
+
+<div class="stats-grid">
+    <div class="stat-box">
+        <div class="number">{{ stats.total_users }}</div>
+        <div class="label">总用户</div>
+    </div>
+    <div class="stat-box">
+        <div class="number">{{ stats.total_albums }}</div>
+        <div class="label">总相册</div>
+    </div>
+    <div class="stat-box">
+        <div class="number">{{ stats.total_media }}</div>
+        <div class="label">总媒体</div>
+    </div>
+    <div class="stat-box">
+        <div class="number">{{ stats.total_accesses }}</div>
+        <div class="label">总访问</div>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-box warning">
+        <div class="number">{{ pending_count }}</div>
+        <div class="label">待审核</div>
+    </div>
+    <div class="stat-box success">
+        <div class="number">{{ expired_count }}</div>
+        <div class="label">过期相册</div>
+    </div>
+    <div class="stat-box">
+        <div class="number">{{ "%.2f"|format(db_size_mb) }} MB</div>
+        <div class="label">数据库大小</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>⚡ 快速操作</h2>
+    <div class="actions">
+        <a href="{{ url_for('reviews') }}" class="btn btn-primary">📋 审核队列 ({{ pending_count }})</a>
+        <a href="{{ url_for('albums') }}" class="btn btn-primary">📁 管理相册</a>
+        <a href="{{ url_for('users') }}" class="btn btn-primary">👥 管理用户</a>
+        <button onclick="cleanup_expired()" class="btn btn-danger">🧹 清理过期相册</button>
+    </div>
+</div>
+
+<script>
+function cleanup_expired() {
+    if (!confirm('确定要清理所有过期相册吗？此操作不可恢复！')) return;
+    fetch('{{ url_for("cleanup_expired") }}', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                alert('已清理 ' + d.deleted + ' 个过期相册');
+                location.reload();
+            }
+        });
+}
+</script>
+{% endblock %}

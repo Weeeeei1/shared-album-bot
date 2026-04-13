@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}内容管理 - Admin Panel{% endblock %}
+
+{% block content %}
+<h1>🖼️ 内容管理</h1>
+
+<div class="card">
+    <h2>内容列表 - {{ status_name }} (共 {{ total }} 条)</h2>
+    
+    <div style="margin-bottom: 1rem;">
+        <a href="{{ url_for('content', status='approved') }}" class="btn {% if status == 'approved' %}btn-success{% else %}btn-primary{% endif %}">✅ 已发布</a>
+        <a href="{{ url_for('content', status='pending') }}" class="btn {% if status == 'pending' %}btn-success{% else %}btn-primary{% endif %}">⏳ 待审核</a>
+        <a href="{{ url_for('content', status='rejected') }}" class="btn {% if status == 'rejected' %}btn-success{% else %}btn-primary{% endif %}">❌ 已拒绝</a>
+    </div>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>类型</th>
+                <th>用户</th>
+                <th>相册</th>
+                <th>描述</th>
+                <th>时间</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in contents %}
+            <tr>
+                <td>{{ c.media_id }}</td>
+                <td>{{ c.file_type }}</td>
+                <td>
+                    {% if c.username %}@{{ c.username }}{% else %}{{ c.first_name }}{% endif %}
+                    <br><small>(ID: {{ c.user_id }})</small>
+                </td>
+                <td>{{ c.album_name }}</td>
+                <td>{{ c.caption[:30] if c.caption else '无' }}{% if c.caption and c.caption|length > 30 %}...{% endif %}</td>
+                <td>{{ c.created_at[:16] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <div class="pagination">
+        {% if page > 0 %}
+        <a href="{{ url_for('content', status=status, page=page-1) }}">◀️ 上一页</a>
+        {% else %}
+        <a class="disabled">◀️ 上一页</a>
+        {% endif %}
+        <span style="padding: 0.5rem;">第 {{ page + 1 }} 页</span>
+        {% if (page + 1) * page_size < total %}
+        <a href="{{ url_for('content', status=status, page=page+1) }}">下一页 ▶️</a>
+        {% else %}
+        <a class="disabled">下一页 ▶️</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

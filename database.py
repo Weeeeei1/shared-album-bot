@@ -5,7 +5,8 @@
 import sqlite3
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
+import os
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 import config
@@ -970,6 +971,226 @@ class Database:
             )
             row = cursor.fetchone()
             return row["count"] if row and "count" in row.keys() else 0
+
+    # ========== Admin Extended User Management ==========
+
+    def get_user_albums_count(self, user_id: int) -> int:
+        """获取用户的相册数量"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM albums WHERE owner_id = ?", (user_id,)
+            )
+            return cursor.fetchone()["count"]
+
+    def get_user_media_count(self, user_id: int) -> int:
+        """获取用户的媒体数量"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM media WHERE user_id = ?", (user_id,)
+            )
+            return cursor.fetchone()["count"]
+
+    def get_user_total_views(self, user_id: int) -> int:
+        """获取用户所有相册的总访问次数"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT COUNT(*) as count FROM access_logs a
+                JOIN albums al ON a.album_id = al.album_id
+                WHERE al.owner_id = ?
+            """,
+                (user_id,),
+            )
+            return cursor.fetchone()["count"]
+
+    def delete_user_albums(self, user_id: int) -> int:
+        """删除用户的所有相册，返回删除数量"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # 先获取用户所有相册ID
+            cursor.execute("SELECT album_id FROM albums WHERE owner_id = ?", (user_id,))
+            album_ids = [row["album_id"] for row in cursor.fetchall()]
+
+            count = len(album_ids)
+            if album_ids:
+                placeholders = ",".join("?" * len(album_ids))
+                cursor.execute(
+                    f"DELETE FROM media WHERE album_id IN ({placeholders})", album_ids
+                )
+                cursor.execute(
+                    f"DELETE FROM access_logs WHERE album_id IN ({placeholders})",
+                    album_ids,
+                )
+                cursor.execute(
+                    f"DELETE FROM blacklist WHERE album_id IN ({placeholders})",
+                    album_ids,
+                )
+                cursor.execute(
+                    f"DELETE FROM followers WHERE album_id IN ({placeholders})",
+                    album_ids,
+                )
+                cursor.execute(
+                    f"DELETE FROM audience WHERE album_id IN ({placeholders})",
+                    album_ids,
+                )
+                cursor.execute(
+                    f"DELETE FROM user_last_viewed WHERE album_id IN ({placeholders})",
+                    album_ids,
+                )
+                cursor.execute("DELETE FROM albums WHERE owner_id = ?", (user_id,))
+            return count
+
+    def delete_user_media(self, user_id: int) -> int:
+        """删除用户的所有媒体，返回删除数量"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM media WHERE user_id = ?", (user_id,)
+            )
+            count = cursor.fetchone()["count"]
+            cursor.execute("DELETE FROM media WHERE user_id = ?", (user_id,))
+            return count
+
+    def get_all_albums(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """获取所有相册（分页）"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT a.*, u.username, u.first_name as owner_name,
+                       (SELECT COUNT(*) FROM media WHERE album_id = a.album_id) as media_count,
+                       (SELECT COUNT(*) FROM access_logs WHERE album_id = a.album_id) as view_count
+                FROM albums a
+                JOIN users u ON a.owner_id = u.user_id
+                ORDER BY a.created_at DESC
+                LIMIT ? OFFSET ?
+            """,
+                (limit, offset),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_all_albums_count(self) -> int:
+        """获取所有相册总数"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) as count FROM albums")
+            return cursor.fetchone()["count"]
+
+    def force_delete_album(self, album_id: int):
+        """强制删除相册（管理员用）"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM media WHERE album_id = ?", (album_id,))
+            cursor.execute("DELETE FROM access_logs WHERE album_id = ?", (album_id,))
+            cursor.execute("DELETE FROM blacklist WHERE album_id = ?", (album_id,))
+            cursor.execute("DELETE FROM followers WHERE album_id = ?", (album_id,))
+            cursor.execute("DELETE FROM audience WHERE album_id = ?", (album_id,))
+            cursor.execute(
+                "DELETE FROM user_last_viewed WHERE album_id = ?", (album_id,)
+            )
+            cursor.execute("DELETE FROM albums WHERE album_id = ?", (album_id,))
+
+    def get_media_by_status(
+        self, status: str, limit: int = 50, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """获取指定状态的媒体（pending/approved/rejected）"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT r.*, u.username, u.first_name, a.name as album_name, a.owner_id
+                FROM pending_reviews r
+                JOIN users u ON r.user_id = u.user_id
+                JOIN albums a ON r.album_id = a.album_id
+                WHERE r.status = ?
+                ORDER BY r.created_at DESC
+                LIMIT ? OFFSET ?
+            """,
+                (status, limit, offset),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_media_by_status_count(self, status: str) -> int:
+        """获取指定状态媒体的数量"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM pending_reviews WHERE status = ?",
+                (status,),
+            )
+            return cursor.fetchone()["count"]
+
+    def get_expired_albums(self) -> List[Dict[str, Any]]:
+        """获取已过期的相册"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT a.*, u.username, u.first_name as owner_name
+                FROM albums a
+                JOIN users u ON a.owner_id = u.user_id
+                WHERE a.expiry_hours > 0
+            """)
+            albums = [dict(row) for row in cursor.fetchall()]
+            expired = []
+            for album in albums:
+                created = datetime.fromisoformat(album["created_at"])
+                expiry = created + timedelta(hours=album["expiry_hours"])
+                if datetime.now() > expiry:
+                    expired.append(album)
+            return expired
+
+    def cleanup_expired_albums(self) -> int:
+        """清理已过期相册，返回删除数量"""
+        expired = self.get_expired_albums()
+        count = len(expired)
+        for album in expired:
+            self.force_delete_album(album["album_id"])
+        return count
+
+    # ========== System Health ==========
+
+    def get_database_size(self) -> int:
+        """获取数据库大小（字节）"""
+        import os
+
+        return os.path.getsize(self.db_file)
+
+    def get_daily_stats(self, days: int = 7) -> List[Dict[str, Any]]:
+        """获取每日用户注册统计"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT DATE(created_at) as date,
+                       COUNT(*) as new_users
+                FROM users
+                WHERE created_at >= DATE('now', ?)
+                GROUP BY DATE(created_at)
+                ORDER BY date
+            """,
+                (f"-{days} days",),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_media_daily_stats(self, days: int = 7) -> List[Dict[str, Any]]:
+        """获取每日媒体上传统计"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT DATE(created_at) as date,
+                       COUNT(*) as new_media
+                FROM media
+                WHERE created_at >= DATE('now', ?)
+                GROUP BY DATE(created_at)
+                ORDER BY date
+            """,
+                (f"-{days} days",),
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
 
 # 全局数据库实例

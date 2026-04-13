@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}登录 - Admin Panel{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 400px; margin: 4rem auto;">
+    <h2>🔐 管理员登录</h2>
+    {% if error %}
+    <div class="alert error">{{ error }}</div>
+    {% endif %}
+    <form method="POST">
+        <div style="margin-bottom: 1rem;">
+            <label style="display: block; margin-bottom: 0.5rem;">管理员用户ID</label>
+            <input type="text" name="user_id" placeholder="请输入管理员ID" required
+                   style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 4px; font-size: 1rem;">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">登录</button>
+    </form>
+</div>
+{% endblock %}

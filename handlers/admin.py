@@ -485,6 +485,7 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     pending_count = db.get_pending_reviews_count()
+    expired_count = len(db.get_expired_albums())
 
     keyboard = [
         [
@@ -492,11 +493,25 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📋 待审核 ({pending_count})", callback_data="admin_pending"
             )
         ],
+        [
+            InlineKeyboardButton("📁 相册管理", callback_data="admin_albums_0"),
+            InlineKeyboardButton(
+                "🖼️ 内容管理", callback_data="admin_content_approved_0"
+            ),
+        ],
+        [
+            InlineKeyboardButton("👥 用户管理", callback_data="admin_users"),
+            InlineKeyboardButton("🏥 系统健康", callback_data="admin_health"),
+        ],
         [InlineKeyboardButton("📊 全局统计", callback_data="admin_stats")],
-        [InlineKeyboardButton("👥 用户管理", callback_data="admin_users")],
         [InlineKeyboardButton("⚙️ 系统设置", callback_data="admin_settings")],
         [InlineKeyboardButton("📢 广播消息", callback_data="admin_broadcast")],
-        [InlineKeyboardButton("🔧 系统维护", callback_data="admin_maintenance")],
+        [
+            InlineKeyboardButton("🔧 系统维护", callback_data="admin_maintenance"),
+            InlineKeyboardButton(
+                f"⚠️ 过期相册({expired_count})", callback_data="admin_albums_0"
+            ),
+        ],
         [InlineKeyboardButton("« 返回主菜单", callback_data="menu_main")],
     ]
 
@@ -552,13 +567,22 @@ async def show_admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 总用户数: {len(users)}
 
-最近注册用户:"""
+👆 点击用户查看详情"""
 
-    for u in users[:10]:
+    keyboard = []
+    for u in users[:15]:
         user_info = f"@{u['username']}" if u["username"] else f"{u['first_name']}"
-        text += f"\n• {user_info} (ID: {u['user_id']})"
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"👤 {user_info}", callback_data=f"admin_user_detail_{u['user_id']}"
+                )
+            ]
+        )
 
-    keyboard = [[InlineKeyboardButton("« 返回管理员菜单", callback_data="admin_menu")]]
+    keyboard.append(
+        [InlineKeyboardButton("« 返回管理员菜单", callback_data="admin_menu")]
+    )
 
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -980,3 +1004,357 @@ async def batch_reject_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.answer(f"❌ 已批量拒绝 {rejected_count} 条")
     await show_admin_pending(update, context)
+
+
+# ========== Enhanced Admin Features ==========
+
+
+async def show_admin_user_detail(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int
+):
+    """显示用户详情"""
+    from handlers.core import is_admin
+
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    user_info = db.get_user(user_id)
+    if not user_info:
+        await query.answer("用户不存在", show_alert=True)
+        return
+
+    albums_count = db.get_user_albums_count(user_id)
+    media_count = db.get_user_media_count(user_id)
+    total_views = db.get_user_total_views(user_id)
+
+    text = f"""👤 用户详情
+
+🆔 用户ID: {user_info["user_id"]}
+📛 名称: {user_info["first_name"]} {user_info.get("last_name", "") or ""}
+👤 用户名: @{user_info["username"] if user_info["username"] else "无"}
+📅 注册时间: {user_info["created_at"][:16]}
+🕐 最后活跃: {user_info["last_active"][:16]}
+
+📊 统计:
+📁 相册数: {albums_count}
+🖼️ 媒体数: {media_count}
+👀 总访问: {total_views}"""
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "🗑️ 删除用户所有内容", callback_data=f"delete_user_content_{user_id}"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "👥 查看用户相册", callback_data=f"view_user_albums_{user_id}"
+            ),
+        ],
+        [
+            InlineKeyboardButton("« 返回用户管理", callback_data="admin_users"),
+        ],
+    ]
+
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def start_delete_user_content(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int
+):
+    """确认删除用户内容"""
+    from handlers.core import is_admin
+
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "✅ 确认删除", callback_data=f"confirm_delete_user_{user_id}"
+            ),
+            InlineKeyboardButton(
+                "❌ 取消", callback_data=f"admin_user_detail_{user_id}"
+            ),
+        ]
+    ]
+
+    await query.edit_message_text(
+        "⚠️ 确认删除该用户的所有内容？\n\n"
+        "这将删除该用户的所有相册和媒体，此操作不可恢复！",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+
+async def confirm_delete_user_content(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int
+):
+    """执行删除用户内容"""
+    from handlers.core import is_admin
+
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    albums_deleted = db.delete_user_albums(user_id)
+    media_deleted = db.delete_user_media(user_id)
+
+    await query.answer(
+        f"✅ 已删除 {albums_deleted} 个相册和 {media_deleted} 个媒体", show_alert=True
+    )
+    await show_admin_users(update, context)
+
+
+async def show_all_albums(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0
+):
+    """显示所有相册"""
+    from handlers.core import is_admin
+
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    page_size = 10
+    offset = page * page_size
+    albums = db.get_all_albums(limit=page_size, offset=offset)
+    total = db.get_all_albums_count()
+    total_pages = (total + page_size - 1) // page_size
+
+    if not albums and page > 0:
+        await query.answer("没有更多相册", show_alert=True)
+        return
+
+    text = f"""📁 所有相册 (第 {page + 1}/{max(1, total_pages)} 页)
+
+共 {total} 个相册\n"""
+
+    keyboard = []
+    for album in albums:
+        owner = f"@{album['username']}" if album["username"] else album["owner_name"]
+        text += f"\n📂 {album['name']}\n"
+        text += f"   👤 {owner} | 🖼️ {album['media_count']} | 👀 {album['view_count']}\n"
+
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"🗑️ 删除'{album['name'][:15]}'",
+                    callback_data=f"force_delete_album_{album['album_id']}",
+                ),
+            ]
+        )
+
+    # 分页按钮
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton("◀️ 上一页", callback_data=f"admin_albums_{page - 1}")
+        )
+    if (page + 1) < total_pages:
+        nav_buttons.append(
+            InlineKeyboardButton("▶️ 下一页", callback_data=f"admin_albums_{page + 1}")
+        )
+    if nav_buttons:
+        keyboard.insert(0, nav_buttons)
+
+    keyboard.append(
+        [InlineKeyboardButton("« 返回管理员菜单", callback_data="admin_menu")]
+    )
+
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def force_delete_album_admin(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, album_id: int
+):
+    """强制删除相册"""
+    from handlers.core import is_admin
+
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    album = db.get_album(album_id)
+    if not album:
+        await query.answer("相册不存在", show_alert=True)
+        return
+
+    db.force_delete_album(album_id)
+    await query.answer(f"✅ 已删除相册: {album['name']}", show_alert=True)
+    await show_all_albums(update, context, page=0)
+
+
+async def show_system_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """显示系统健康状态"""
+    from handlers.core import is_admin
+
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    stats = db.get_stats()
+    db_size = db.get_database_size()
+    db_size_mb = db_size / (1024 * 1024)
+
+    # 计算待审核积压警告
+    pending_count = db.get_pending_reviews_count()
+    pending_warning = "⚠️ 积压较多!" if pending_count > 20 else ""
+
+    # 获取过期相册数量
+    expired = db.get_expired_albums()
+
+    # 获取最近7天统计
+    daily_stats = db.get_daily_stats(7)
+    media_stats = db.get_media_daily_stats(7)
+
+    total_new_users_7d = sum(d.get("new_users", 0) for d in daily_stats)
+    total_new_media_7d = sum(d.get("new_media", 0) for d in media_stats)
+
+    text = f"""🏥 系统健康状态
+
+📊 基本统计:
+👥 总用户: {stats["total_users"]}
+📁 总相册: {stats["total_albums"]}
+🖼️ 总媒体: {stats["total_media"]}
+👀 总访问: {stats["total_accesses"]}
+
+📈 7天趋势:
+👤 新增用户: {total_new_users_7d}
+🖼️ 新增媒体: {total_new_media_7d}
+
+💾 数据库:
+📦 大小: {db_size_mb:.2f} MB
+
+⏳ 审核队列:
+📋 待审核: {pending_count} {pending_warning}
+
+🕐 过期相册: {len(expired)} 个"""
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "🧹 清理过期相册", callback_data="cleanup_expired_albums"
+            )
+        ],
+        [InlineKeyboardButton("📊 详细统计", callback_data="show_detailed_stats")],
+        [InlineKeyboardButton("« 返回管理员菜单", callback_data="admin_menu")],
+    ]
+
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def cleanup_expired_albums_admin(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    """清理过期相册"""
+    from handlers.core import is_admin
+
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    count = db.cleanup_expired_albums()
+    await query.answer(f"✅ 已清理 {count} 个过期相册", show_alert=True)
+    await show_system_health(update, context)
+
+
+async def show_all_content(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    status: str = "approved",
+    page: int = 0,
+):
+    """显示所有内容"""
+    from handlers.core import is_admin
+
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    page_size = 10
+    offset = page * page_size
+    contents = db.get_media_by_status(status, limit=page_size, offset=offset)
+    total = db.get_media_by_status_count(status)
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+    status_text = {"approved": "已发布", "rejected": "已拒绝", "pending": "待审核"}
+    current_status = status_text.get(status, status)
+
+    if not contents and page > 0:
+        await query.answer("没有更多内容", show_alert=True)
+        return
+
+    text = f"""📋 内容管理 - {current_status} (第 {page + 1}/{max(1, total_pages)} 页)
+
+共 {total} 条内容\n"""
+
+    keyboard = []
+
+    # 状态切换按钮
+    status_buttons = []
+    for s, sname in status_text.items():
+        if s != status:
+            status_buttons.append(
+                InlineKeyboardButton(sname, callback_data=f"admin_content_{s}_0")
+            )
+    if status_buttons:
+        keyboard.append(status_buttons)
+
+    for content in contents:
+        user_info = (
+            f"@{content['username']}" if content["username"] else content["first_name"]
+        )
+        caption = content["caption"][:20] if content["caption"] else "无描述"
+        text += f"\n🖼️ #{content['media_id']} - {content['file_type']}\n"
+        text += f"   👤 {user_info} | 📁 {content['album_name']}\n"
+        text += f"   💬 {caption}\n"
+        text += f"   🕐 {content['created_at'][:16]}\n"
+
+    # 分页按钮
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton(
+                "◀️ 上一页", callback_data=f"admin_content_{status}_{page - 1}"
+            )
+        )
+    if (page + 1) < total_pages:
+        nav_buttons.append(
+            InlineKeyboardButton(
+                "▶️ 下一页", callback_data=f"admin_content_{status}_{page + 1}"
+            )
+        )
+    if nav_buttons:
+        keyboard.insert(0, nav_buttons)
+
+    keyboard.append(
+        [InlineKeyboardButton("« 返回管理员菜单", callback_data="admin_menu")]
+    )
+
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
