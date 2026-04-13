@@ -120,6 +120,7 @@ pytest tests/test_database.py -v
 | 服务器地址 | 129.226.213.40 |
 | 项目路径 | /root/.openclaw/workspace/shared-album-bot |
 | GitHub 仓库 | https://github.com/Weeeeei1/shared-album-bot |
+| GitHub token | <YOUR_GITHUB_TOKEN>
 
 ### 部署步骤
 

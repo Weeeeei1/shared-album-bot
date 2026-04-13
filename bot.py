@@ -289,6 +289,10 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_type = None
     caption = message.caption or ""
 
+    # 如果没有留言，使用默认留言
+    if not caption:
+        caption = "好s"
+
     if message.photo:
         file_id = message.photo[-1].file_id
         file_type = "photo"
@@ -788,6 +792,256 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("reject_review_"):
         review_id = int(data.split("_")[2])
         await reject_review(update, context, review_id)
+
+    elif data.startswith("preview_review_"):
+        review_id = int(data.split("_")[2])
+        await preview_review(update, context, review_id)
+
+    elif data == "batch_approve_all":
+        await batch_approve_all(update, context)
+
+    elif data == "batch_reject_all":
+        await batch_reject_all(update, context)
+
+
+async def preview_review(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, review_id: int
+):
+    """预览待审核媒体"""
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    review = db.get_pending_review(review_id)
+    if not review:
+        await query.answer("❌ 审核记录不存在", show_alert=True)
+        return
+
+    user_info = f"@{review['username']}" if review["username"] else review["first_name"]
+    album = db.get_album(review["album_id"]) if review["album_id"] else None
+    album_name = album["name"] if album else "未知相册"
+
+    caption_text = f"""👤 用户: {user_info}
+📁 相册: {album_name}
+💬 留言: {review["caption"] or "无"}
+🕐 时间: {review["created_at"][:16]}"""
+
+    try:
+        # 发送媒体预览
+        if review["file_type"] == "photo":
+            await query.message.reply_photo(
+                photo=review["file_id"],
+                caption=caption_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                "✅ 通过",
+                                callback_data=f"approve_review_{review_id}",
+                            ),
+                            InlineKeyboardButton(
+                                "❌ 拒绝",
+                                callback_data=f"reject_review_{review_id}",
+                            ),
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                "« 返回列表",
+                                callback_data="admin_pending",
+                            )
+                        ],
+                    ]
+                ),
+            )
+        elif review["file_type"] == "video":
+            await query.message.reply_video(
+                video=review["file_id"],
+                caption=caption_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                "✅ 通过",
+                                callback_data=f"approve_review_{review_id}",
+                            ),
+                            InlineKeyboardButton(
+                                "❌ 拒绝",
+                                callback_data=f"reject_review_{review_id}",
+                            ),
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                "« 返回列表",
+                                callback_data="admin_pending",
+                            )
+                        ],
+                    ]
+                ),
+            )
+        else:
+            await query.message.reply_document(
+                document=review["file_id"],
+                caption=caption_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                "✅ 通过",
+                                callback_data=f"approve_review_{review_id}",
+                            ),
+                            InlineKeyboardButton(
+                                "❌ 拒绝",
+                                callback_data=f"reject_review_{review_id}",
+                            ),
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                "« 返回列表",
+                                callback_data="admin_pending",
+                            )
+                        ],
+                    ]
+                ),
+            )
+        await query.answer()
+    except Exception as e:
+        logger.error(f"预览审核媒体失败: {e}", exc_info=True)
+        await query.answer(f"❌ 预览失败: {e}", show_alert=True)
+
+
+async def batch_approve_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """批量通过所有待审核"""
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    reviews = db.get_all_pending_reviews()
+    if not reviews:
+        await query.answer("没有待审核的媒体", show_alert=True)
+        return
+
+    approved_count = 0
+    failed_count = 0
+
+    for review in reviews:
+        try:
+            # 直接调用 approve_review 的逻辑，但不发送消息
+            review_id = review["review_id"]
+
+            # 更新审核状态
+            db.update_review_status(review_id, "approved", user.id)
+
+            # 发布到公开频道
+            user_info = (
+                f"@{review['username']}" if review["username"] else review["first_name"]
+            )
+            caption_text = review["caption"] or ""
+            album = db.get_album(review["album_id"]) if review["album_id"] else None
+            album_name = album["name"] if album else "未知相册"
+
+            public_caption = f"""{caption_text}
+
+👤 {user_info}
+📁 {album_name}
+🤖 <a href="https://t.me/{context.bot.username}">使用机器人创建</a>"""
+
+            # 发送媒体到公开频道
+            if review["file_type"] == "photo":
+                public_msg = await context.bot.send_photo(
+                    chat_id=config.PUBLIC_CHANNEL_ID,
+                    photo=review["file_id"],
+                    caption=public_caption,
+                    parse_mode=ParseMode.HTML,
+                )
+            elif review["file_type"] == "video":
+                public_msg = await context.bot.send_video(
+                    chat_id=config.PUBLIC_CHANNEL_ID,
+                    video=review["file_id"],
+                    caption=public_caption,
+                    parse_mode=ParseMode.HTML,
+                )
+            else:
+                public_msg = await context.bot.send_document(
+                    chat_id=config.PUBLIC_CHANNEL_ID,
+                    document=review["file_id"],
+                    caption=public_caption,
+                    parse_mode=ParseMode.HTML,
+                )
+
+            # 更新媒体记录
+            db.update_public_message_id(review["media_id"], public_msg.message_id)
+
+            # 通知用户
+            try:
+                await context.bot.send_message(
+                    chat_id=review["user_id"],
+                    text="✅ 你的媒体已通过审核并发布到公开频道！",
+                )
+            except:
+                pass
+
+            approved_count += 1
+        except Exception as e:
+            logger.error(f"批量通过审核 {review['review_id']} 失败: {e}")
+            failed_count += 1
+
+    await query.answer(
+        f"✅ 批量通过完成: 成功 {approved_count} 条, 失败 {failed_count} 条",
+        show_alert=True,
+    )
+    await show_admin_pending(update, context)
+
+
+async def batch_reject_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """批量拒绝所有待审核"""
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    reviews = db.get_all_pending_reviews()
+    if not reviews:
+        await query.answer("没有待审核的媒体", show_alert=True)
+        return
+
+    rejected_count = 0
+
+    for review in reviews:
+        try:
+            review_id = review["review_id"]
+
+            # 更新审核状态
+            db.update_review_status(review_id, "rejected", user.id)
+
+            # 通知用户
+            try:
+                await context.bot.send_message(
+                    chat_id=review["user_id"],
+                    text="❌ 你的媒体未通过审核，未发布到公开频道。",
+                )
+            except:
+                pass
+
+            rejected_count += 1
+        except Exception as e:
+            logger.error(f"批量拒绝审核 {review['review_id']} 失败: {e}")
+
+    await query.answer(
+        f"✅ 批量拒绝完成: 共拒绝 {rejected_count} 条",
+        show_alert=True,
+    )
+    await show_admin_pending(update, context)
 
 
 async def process_batch_save(
@@ -2346,6 +2600,7 @@ async def approve_review(
         public_caption = f"""{caption_text}
 
 👤 {user_info}
+📁 {review["album_name"]}
 
 🤖 <a href="https://t.me/{context.bot.username}">使用机器人创建</a>"""
 
@@ -2663,9 +2918,11 @@ async def show_admin_pending(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
+    # 发送待审核列表，包含预览功能
     text = f"""📋 待审核列表
 
-共 {len(reviews)} 条待审核"""
+共 {len(reviews)} 条待审核
+👇 点击「查看」查看媒体详情"""
 
     keyboard = []
 
@@ -2673,23 +2930,37 @@ async def show_admin_pending(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_info = (
             f"@{review['username']}" if review["username"] else review["first_name"]
         )
-        text += f"\n\n📝 #{review['review_id']}\n"
-        text += f"👤 {user_info}\n"
-        text += f"📁 {review['album_name']}\n"
-        text += f"🕐 {review['created_at'][:16]}"
+        text += f"\n\n📝 #{review['review_id']}"
+        text += f"\n👤 {user_info}"
+        text += f"\n📁 {review['album_name']}"
+        text += f"\n💬 {review['caption'][:30] if review['caption'] else '无留言'}"
+        text += f"\n🕐 {review['created_at'][:16]}"
 
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    f"✅ 通过 #{review['review_id']}",
+                    f"👁 查看 #{review['review_id']}",
+                    callback_data=f"preview_review_{review['review_id']}",
+                ),
+                InlineKeyboardButton(
+                    f"✅ 通过",
                     callback_data=f"approve_review_{review['review_id']}",
                 ),
                 InlineKeyboardButton(
-                    f"❌ 拒绝 #{review['review_id']}",
+                    f"❌ 拒绝",
                     callback_data=f"reject_review_{review['review_id']}",
                 ),
             ]
         )
+
+    # 添加批量操作按钮
+    keyboard.insert(
+        0,
+        [
+            InlineKeyboardButton("✅ 批量通过全部", callback_data="batch_approve_all"),
+            InlineKeyboardButton("❌ 批量拒绝全部", callback_data="batch_reject_all"),
+        ],
+    )
 
     keyboard.append(
         [InlineKeyboardButton("« 返回管理员菜单", callback_data="admin_menu")]
