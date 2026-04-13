@@ -34,6 +34,9 @@ try:
         start_set_limit,
         block_user_from_album,
     )
+    from handlers.media import (
+        process_caption_media,
+    )
     from handlers.media_ops import (
         show_preview,
         confirm_delete_media,
@@ -58,10 +61,15 @@ try:
         batch_approve_all,
         batch_reject_all,
     )
-except Exception:
+except Exception as e:
     # In case of import-time circulars during initial boot, we still allow the script to run
     # by falling back to local definitions (these will be overwritten once init completes).
-    pass
+    import sys
+
+    print(f"WARNING: Handler import failed: {e}", file=sys.stderr)
+    import traceback
+
+    traceback.print_exc()
 
 # 设置日志
 logging.basicConfig(
