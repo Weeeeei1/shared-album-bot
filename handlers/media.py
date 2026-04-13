@@ -625,6 +625,12 @@ async def process_caption_media(
 
     album = db.get_album(album_id)
 
+    if not album:
+        await query.answer("相册不存在", show_alert=True)
+        return
+
+    await query.answer()
+
     # 显示公开/保存选择
     keyboard = [
         [

@@ -3902,41 +3902,6 @@ async def show_my_fans(
     await query.edit_message_text(text, reply_markup=keyboard)
 
 
-async def process_caption_media(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, album_id: int
-):
-    """处理留言后选择相册的媒体"""
-    query = update.callback_query
-    user = update.effective_user
-
-    pending = context.user_data.get("pending_media_for_caption")
-    caption = context.user_data.get("pending_caption", "好s")
-
-    if not pending:
-        await query.answer("超时，请重新上传媒体", show_alert=True)
-        return
-
-    album = db.get_album(album_id)
-
-    # 显示公开/保存选择
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "📢 公开到频道（需审核）", callback_data="caption_publish_public"
-            )
-        ],
-        [InlineKeyboardButton("🔒 仅保存", callback_data="caption_publish_private")],
-    ]
-
-    await query.edit_message_text(
-        f"✅ 将保存到相册: {album['name']}\n📝 留言: {caption}\n\n是否公开到频道？",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-
-    # 保存选择
-    context.user_data["caption_album_id"] = album_id
-
-
 async def publish_caption_media(
     update: Update, context: ContextTypes.DEFAULT_TYPE, is_public: bool
 ):
