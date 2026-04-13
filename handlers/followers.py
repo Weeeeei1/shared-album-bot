@@ -340,14 +340,14 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     album = db.get_album(album_id)
-    followers = db.get_followers(user.id, album_id)
+    audience = db.get_audience(user.id, album_id)
 
-    if not followers:
-        await query.answer("没有粉丝可以通知", show_alert=True)
+    if not audience:
+        await query.answer("没有观众可以通知", show_alert=True)
         return
 
     sent = 0
-    for follower_id in followers:
+    for viewer_id in audience:
         try:
             keyboard = InlineKeyboardMarkup(
                 [
@@ -359,7 +359,7 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             )
             await context.bot.send_message(
-                chat_id=follower_id,
+                chat_id=viewer_id,
                 text=f"📢 {album['name']} 有新更新！\n\n{message_text}",
                 reply_markup=keyboard,
             )
@@ -367,16 +367,16 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(0.1)
         except Exception as e:
             logging = __import__("logging")
-            logging.getLogger(__name__).warning(f"发送广播给 {follower_id} 失败: {e}")
+            logging.getLogger(__name__).warning(f"发送广播给 {viewer_id} 失败: {e}")
 
-    await query.answer(f"✅ 已发送给 {sent} 位粉丝")
+    await query.answer(f"✅ 已发送给 {sent} 位观众")
 
     context.user_data.pop("broadcast_album_id", None)
     context.user_data.pop("waiting_for", None)
     context.user_data.pop("broadcast_text", None)
 
     await query.edit_message_text(
-        f"✅ 广播已发送!\n\n已发送给 {sent} 位粉丝。",
+        f"✅ 广播已发送!\n\n已发送给 {sent} 位观众。",
         reply_markup=InlineKeyboardMarkup(
             [
                 [

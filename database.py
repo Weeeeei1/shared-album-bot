@@ -869,6 +869,16 @@ class Database:
             row = cursor.fetchone()
             return row["count"] if row and "count" in row.keys() else 0
 
+    def get_audience(self, publisher_id: int, album_id: int) -> List[int]:
+        """Get all audience (viewers who clicked share link) user_ids for a given album"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT viewer_id FROM audience WHERE publisher_id = ? AND album_id = ?",
+                (publisher_id, album_id),
+            )
+            return [row["viewer_id"] for row in cursor.fetchall()]
+
     def add_follower(self, follower_id: int, publisher_id: int, album_id: int):
         """Add follower relationship; upsert timestamp"""
         with self.get_connection() as conn:

@@ -378,27 +378,27 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         db.add_media(broadcast_album_id, user.id, file_id, file_type, caption)
 
-        # 直接发送给粉丝
-        followers = db.get_followers(user.id, broadcast_album_id)
+        # 直接发送给所有访客（点击过分享链接的人）
+        audience = db.get_audience(user.id, broadcast_album_id)
         sent = 0
-        for follower_id in followers:
+        for viewer_id in audience:
             try:
                 if file_type == "photo":
                     await context.bot.send_photo(
-                        chat_id=follower_id, photo=file_id, caption=caption
+                        chat_id=viewer_id, photo=file_id, caption=caption
                     )
                 elif file_type == "video":
                     await context.bot.send_video(
-                        chat_id=follower_id, video=file_id, caption=caption
+                        chat_id=viewer_id, video=file_id, caption=caption
                     )
                 else:
                     await context.bot.send_document(
-                        chat_id=follower_id, document=file_id, caption=caption
+                        chat_id=viewer_id, document=file_id, caption=caption
                     )
                 sent += 1
                 await asyncio.sleep(0.1)
             except Exception as e:
-                logger.warning(f"广播给 {follower_id} 失败: {e}")
+                logger.warning(f"广播给 {viewer_id} 失败: {e}")
 
         # 清理状态
         for key in [
@@ -411,7 +411,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]:
             context.user_data.pop(key, None)
 
-        await message.reply_text(f"✅ 广播已发送！已发送给 {sent} 位粉丝")
+        await message.reply_text(f"✅ 广播已发送！已发送给 {sent} 位观众")
         return
 
     # ========== 常规媒体上传 ==========
@@ -2362,18 +2362,18 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
         # 保存到广播相册
         db.add_media(broadcast_album_id, user.id, "text", "text", text)
 
-        # 直接发送给粉丝
-        followers = db.get_followers(user.id, broadcast_album_id)
+        # 直接发送给所有观众（点击过分享链接的人）
+        audience = db.get_audience(user.id, broadcast_album_id)
         sent = 0
-        for follower_id in followers:
+        for viewer_id in audience:
             try:
                 await context.bot.send_message(
-                    chat_id=follower_id, text=f"📢 {user.first_name} 的广播：\n\n{text}"
+                    chat_id=viewer_id, text=f"📢 {user.first_name} 的广播：\n\n{text}"
                 )
                 sent += 1
                 await asyncio.sleep(0.1)
             except Exception as e:
-                logger.warning(f"广播给 {follower_id} 失败: {e}")
+                logger.warning(f"广播给 {viewer_id} 失败: {e}")
 
         # 清理状态
         for key in [
@@ -2387,7 +2387,7 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
         ]:
             context.user_data.pop(key, None)
 
-        await update.message.reply_text(f"✅ 广播已发送！已发送给 {sent} 位粉丝")
+        await update.message.reply_text(f"✅ 广播已发送！已发送给 {sent} 位观众")
 
 
 async def execute_admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4136,15 +4136,15 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     album = db.get_album(album_id)
-    followers = db.get_followers(user.id, album_id)
+    audience = db.get_audience(user.id, album_id)
 
-    if not followers:
-        await query.answer("没有粉丝可以通知", show_alert=True)
+    if not audience:
+        await query.answer("没有观众可以通知", show_alert=True)
         return
 
-    # Send notification to each follower
+    # Send notification to each viewer (audience)
     sent = 0
-    for follower_id in followers:
+    for viewer_id in audience:
         try:
             keyboard = InlineKeyboardMarkup(
                 [
@@ -4156,23 +4156,23 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             )
             await context.bot.send_message(
-                chat_id=follower_id,
+                chat_id=viewer_id,
                 text=f"📢 {album['name']} 有新更新！\n\n{message_text}",
                 reply_markup=keyboard,
             )
             sent += 1
             await asyncio.sleep(0.1)  # Rate limit
         except Exception as e:
-            logger.warning(f"发送广播给 {follower_id} 失败: {e}")
+            logger.warning(f"发送广播给 {viewer_id} 失败: {e}")
 
-    await query.answer(f"✅ 已发送给 {sent} 位粉丝")
+    await query.answer(f"✅ 已发送给 {sent} 位观众")
 
     context.user_data.pop("broadcast_album_id", None)
     context.user_data.pop("waiting_for", None)
     context.user_data.pop("broadcast_text", None)
 
     await query.edit_message_text(
-        f"✅ 广播已发送!\n\n已发送给 {sent} 位粉丝。",
+        f"✅ 广播已发送!\n\n已发送给 {sent} 位观众。",
         reply_markup=InlineKeyboardMarkup(
             [
                 [
