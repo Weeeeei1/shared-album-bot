@@ -776,7 +776,7 @@ async def use_default_caption(update: Update, context: ContextTypes.DEFAULT_TYPE
     # 使用默认留言
     caption = "好s"
     context.user_data["pending_caption"] = caption
-    context.user_data.pop("pending_media_for_caption", None)
+    # 注意：不要删除 pending_media_for_caption，因为它在 process_caption_media 中还需要使用
 
     # 让用户选择相册
     await query.answer()
