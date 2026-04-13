@@ -4,6 +4,7 @@
 
 import sqlite3
 import json
+import asyncio
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
@@ -13,12 +14,44 @@ import config
 class Database:
     def __init__(self, db_file: str = config.DATABASE_FILE):
         self.db_file = db_file
+        self._lock = asyncio.Lock()  # 用于异步上下文中的写锁
         self.init_db()
 
     @contextmanager
     def get_connection(self):
-        conn = sqlite3.connect(self.db_file)
+        """获取数据库连接，自动启用WAL模式和超时处理"""
+        conn = sqlite3.connect(self.db_file, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        # 启用 WAL 模式，提升并发读性能
+        conn.execute("PRAGMA journal_mode=WAL")
+        # 设置同步模式为 NORMAL，平衡性能和安全
+        conn.execute("PRAGMA synchronous=NORMAL")
+        # 设置 busy_timeout，避免立即失败
+        conn.execute("PRAGMA busy_timeout=30000")
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
+    async def get_connection_async(self):
+        """异步获取数据库连接（在线程池中执行）"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._sync_get_connection)
+
+    def _sync_get_connection(self):
+        """同步获取连接（供线程池使用）"""
+        conn = sqlite3.connect(self.db_file, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
+
+    @contextmanager
+    def get_connection_with_lock(self):
+        """带锁的数据库连接（用于写操作）"""
+        conn = self._sync_get_connection()
         try:
             yield conn
             conn.commit()

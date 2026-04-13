@@ -20,6 +20,7 @@ from telegram.constants import ParseMode
 
 import config
 from database import db
+from utils import task_manager, rate_limiter
 
 # 设置日志
 logging.basicConfig(
@@ -359,7 +360,9 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(2)
             await process_batch_upload(update, context)
 
-        context.user_data["batch_timer"] = asyncio.create_task(process_batch())
+        context.user_data["batch_timer"] = task_manager.spawn(
+            process_batch(), name=f"batch_{user.id}"
+        )
 
     except Exception as e:
         logger.error(f"处理媒体时出错: {e}", exc_info=True)
@@ -1486,7 +1489,10 @@ async def show_preview(
 
             # asyncio.create_task 返回的 Task 会被事件循环保留引用，
             # 只要事件循环在运行，任务就会执行完成，无需手动跟踪
-            asyncio.create_task(delete_message_after_delay())
+            task_manager.spawn(
+                delete_message_after_delay(),
+                name=f"delete_msg_{sent_message.message_id}",
+            )
 
     except Exception as e:
         logger.error(f"发送预览失败: {e}", exc_info=True)
@@ -2292,7 +2298,9 @@ async def view_shared_album(
                         logger.warning(f"删除消息 {msg_id} 失败: {e}")
 
             # 启动后台任务删除所有消息（事件循环会保留引用，无需手动跟踪）
-            asyncio.create_task(delete_all_messages_after_delay())
+            task_manager.spawn(
+                delete_all_messages_after_delay(), name=f"delete_batch_{user.id}"
+            )
 
     except Exception as e:
         logger.error(f"发送相册失败: {e}", exc_info=True)
