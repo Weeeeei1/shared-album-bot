@@ -665,7 +665,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "broadcast_start":
         await start_broadcast_publisher(update, context)
 
-    elif data.startswith("broadcast_confirm_"):
+    elif data == "broadcast_confirm":
         await confirm_broadcast(update, context)
 
     elif data == "cancel_broadcast":
