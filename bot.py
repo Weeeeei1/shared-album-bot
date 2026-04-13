@@ -297,6 +297,117 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 保存用户信息
     db.add_user(user.id, user.username, user.first_name, user.last_name)
 
+    # ========== 广播模式检查 ==========
+    waiting_for = context.user_data.get("waiting_for")
+
+    # 管理员广播模式 - 保存媒体等待确认
+    if waiting_for == "admin_broadcast":
+        # 获取媒体信息
+        file_id = None
+        file_type = None
+        if message.photo:
+            file_id = message.photo[-1].file_id
+            file_type = "photo"
+        elif message.video:
+            file_id = message.video.file_id
+            file_type = "video"
+        elif message.document:
+            file_id = message.document.file_id
+            file_type = "document"
+        elif message.audio:
+            file_id = message.audio.file_id
+            file_type = "audio"
+        else:
+            await message.reply_text("❌ 不支持的媒体类型")
+            return
+
+        context.user_data["broadcast_media_file_id"] = file_id
+        context.user_data["broadcast_media_type"] = file_type
+        context.user_data["waiting_for"] = "admin_broadcast_caption"
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "✅ 确认发送", callback_data="confirm_admin_broadcast"
+                    )
+                ],
+                [InlineKeyboardButton("« 取消广播", callback_data="cancel_broadcast")],
+            ]
+        )
+
+        await message.reply_text(
+            f"📷 {file_type} 已收到\n\n💬 请添加描述文字（可选）：",
+            reply_markup=keyboard,
+        )
+        return
+
+    # 用户广播模式 - 直接发送给粉丝
+    elif waiting_for == "user_broadcast":
+        # 获取媒体信息
+        file_id = None
+        file_type = None
+        if message.photo:
+            file_id = message.photo[-1].file_id
+            file_type = "photo"
+        elif message.video:
+            file_id = message.video.file_id
+            file_type = "video"
+        elif message.document:
+            file_id = message.document.file_id
+            file_type = "document"
+        else:
+            await message.reply_text("❌ 不支持的媒体类型")
+            return
+
+        caption = message.caption or ""
+
+        # 保存到广播相册
+        broadcast_album_id = context.user_data.get("broadcast_album_id")
+        if not broadcast_album_id:
+            broadcast_album_id = db.get_or_create_broadcast_album(user.id)
+            context.user_data["broadcast_album_id"] = broadcast_album_id
+
+        db.add_media(broadcast_album_id, user.id, file_id, file_type, caption)
+
+        # 直接发送给粉丝
+        followers = db.get_followers(user.id, broadcast_album_id)
+        sent = 0
+        for follower_id in followers:
+            try:
+                if file_type == "photo":
+                    await context.bot.send_photo(
+                        chat_id=follower_id, photo=file_id, caption=caption
+                    )
+                elif file_type == "video":
+                    await context.bot.send_video(
+                        chat_id=follower_id, video=file_id, caption=caption
+                    )
+                else:
+                    await context.bot.send_document(
+                        chat_id=follower_id, document=file_id, caption=caption
+                    )
+                sent += 1
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logger.warning(f"广播给 {follower_id} 失败: {e}")
+
+        # 清理状态
+        for key in [
+            "broadcast_album_id",
+            "waiting_for",
+            "broadcast_start_time",
+            "broadcast_type",
+            "broadcast_media_file_id",
+            "broadcast_media_type",
+        ]:
+            context.user_data.pop(key, None)
+
+        await message.reply_text(f"✅ 广播已发送！已发送给 {sent} 位粉丝")
+        return
+
+    # ========== 常规媒体上传 ==========
+
     # 检查频道订阅（管理员豁免）
     if not is_admin(user.id):
         if not await check_channel_membership(user.id, context):
@@ -922,6 +1033,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "admin_broadcast":
         await start_broadcast(update, context)
+
+    elif data == "confirm_admin_broadcast":
+        await execute_admin_broadcast(update, context)
 
     elif data == "admin_maintenance":
         await show_admin_maintenance(update, context)
@@ -2175,66 +2289,170 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
                 "❌ 无效的群组ID，请输入数字格式（如: -1001234567890）"
             )
 
-    elif waiting_for == "broadcast_message":
-        # 广播消息
+    # ========== 管理员广播 - 文字 ==========
+    elif waiting_for == "admin_broadcast":
+        # 管理员广播文字
         if not is_admin(user.id):
             return
 
-        context.user_data.pop("waiting_for", None)
-
-        # 发送确认
-        keyboard = [
-            [InlineKeyboardButton("« 返回管理员菜单", callback_data="admin_menu")]
-        ]
-        await update.message.reply_text(
-            "📢 开始广播...\n\n正在向所有用户发送消息...",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-
-        # 获取所有用户并广播
-        users = db.get_all_users()
-        success_count = 0
-        fail_count = 0
-
-        for u in users:
-            try:
-                await context.bot.send_message(
-                    chat_id=u["user_id"], text=f"📢 系统公告:\n\n{text}"
-                )
-                success_count += 1
-            except Exception as e:
-                logger.error(f"广播给用户 {u['user_id']} 失败: {e}", exc_info=True)
-                fail_count += 1
-
-        # 发送结果
-        await update.message.reply_text(
-            f"✅ 广播完成\n\n成功: {success_count}\n失败: {fail_count}",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-
-    elif waiting_for == "publisher_broadcast":
-        # 发布者广播（向粉丝发送通知）
-        album_id = context.user_data.get("broadcast_album_id")
-        if not album_id:
-            return
-
-        album = db.get_album(album_id)
-        context.user_data["broadcast_text"] = text
-
-        text_display = f"📢 确认广播?\n\n相册: {album['name']}\n\n内容:\n{text}\n\n点击确认发送或取消:"
+        # 保存文字内容
+        context.user_data["broadcast_text"] = text.strip()
+        context.user_data["waiting_for"] = "admin_broadcast_text_done"
 
         keyboard = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        "✅ 确认发送", callback_data="broadcast_confirm"
+                        "✅ 确认发送", callback_data="confirm_admin_broadcast"
                     )
                 ],
-                [InlineKeyboardButton("« 取消", callback_data="cancel_broadcast")],
+                [InlineKeyboardButton("« 取消广播", callback_data="cancel_broadcast")],
             ]
         )
 
-        await update.message.reply_text(text_display, reply_markup=keyboard)
+        await update.message.reply_text(
+            f"📝 广播内容预览：\n\n{text}\n\n确认发送给所有用户？",
+            reply_markup=keyboard,
+        )
+
+    elif waiting_for == "admin_broadcast_caption":
+        # 管理员广播媒体 - 已收到媒体，正在等待文字描述
+        caption = text.strip()
+        context.user_data["broadcast_text"] = caption
+        context.user_data["waiting_for"] = "admin_broadcast_media_done"
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "✅ 确认发送", callback_data="confirm_admin_broadcast"
+                    )
+                ],
+                [InlineKeyboardButton("« 取消广播", callback_data="cancel_broadcast")],
+            ]
+        )
+
+        await update.message.reply_text(
+            f"📝 描述已添加：\n\n{caption}\n\n确认发送给所有用户？",
+            reply_markup=keyboard,
+        )
+
+    # ========== 用户广播 - 文字 ==========
+    elif waiting_for == "user_broadcast":
+        # 用户广播文字 - 直接发送给粉丝
+        if not text.strip():
+            await update.message.reply_text("❌ 广播内容不能为空，请重新输入：")
+            return
+
+        broadcast_album_id = context.user_data.get("broadcast_album_id")
+        if not broadcast_album_id:
+            broadcast_album_id = db.get_or_create_broadcast_album(user.id)
+            context.user_data["broadcast_album_id"] = broadcast_album_id
+
+        # 保存到广播相册
+        db.add_media(broadcast_album_id, user.id, "text", "text", text)
+
+        # 直接发送给粉丝
+        followers = db.get_followers(user.id, broadcast_album_id)
+        sent = 0
+        for follower_id in followers:
+            try:
+                await context.bot.send_message(
+                    chat_id=follower_id, text=f"📢 {user.first_name} 的广播：\n\n{text}"
+                )
+                sent += 1
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logger.warning(f"广播给 {follower_id} 失败: {e}")
+
+        # 清理状态
+        for key in [
+            "broadcast_album_id",
+            "waiting_for",
+            "broadcast_start_time",
+            "broadcast_type",
+            "broadcast_media_file_id",
+            "broadcast_media_type",
+            "broadcast_text",
+        ]:
+            context.user_data.pop(key, None)
+
+        await update.message.reply_text(f"✅ 广播已发送！已发送给 {sent} 位粉丝")
+
+
+async def execute_admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """执行管理员广播"""
+    query = update.callback_query
+    user = update.effective_user
+
+    if not is_admin(user.id):
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    # 获取广播内容
+    text = context.user_data.get("broadcast_text", "")
+    file_id = context.user_data.get("broadcast_media_file_id")
+    file_type = context.user_data.get("broadcast_media_type")
+
+    # 创建广播相册
+    broadcast_album_id = db.get_or_create_broadcast_album(user.id)
+
+    # 保存到数据库
+    if file_id:
+        db.add_media(broadcast_album_id, user.id, file_id, file_type, text)
+    else:
+        db.add_media(broadcast_album_id, user.id, "text", "text", text)
+
+    # 发送给所有用户
+    users = db.get_all_users()
+    sent = 0
+    failed = 0
+
+    await query.answer("正在发送...")
+
+    for u in users:
+        try:
+            if file_id:
+                if file_type == "photo":
+                    await context.bot.send_photo(
+                        chat_id=u["user_id"], photo=file_id, caption=text
+                    )
+                elif file_type == "video":
+                    await context.bot.send_video(
+                        chat_id=u["user_id"], video=file_id, caption=text
+                    )
+                else:
+                    await context.bot.send_document(
+                        chat_id=u["user_id"], document=file_id, caption=text
+                    )
+            else:
+                await context.bot.send_message(
+                    chat_id=u["user_id"], text=f"📢 系统公告:\n\n{text}"
+                )
+            sent += 1
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.warning(f"广播给用户 {u['user_id']} 失败: {e}")
+            failed += 1
+
+    # 清理状态
+    for key in [
+        "broadcast_album_id",
+        "waiting_for",
+        "broadcast_start_time",
+        "broadcast_type",
+        "broadcast_media_file_id",
+        "broadcast_media_type",
+        "broadcast_text",
+    ]:
+        context.user_data.pop(key, None)
+
+    await query.edit_message_text(
+        f"✅ 广播完成！\n\n发送成功: {sent}\n发送失败: {failed}",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("« 返回管理员菜单", callback_data="admin_menu")]]
+        ),
+    )
 
 
 async def start_create_album(update: Update, context: ContextTypes.DEFAULT_TYPE):

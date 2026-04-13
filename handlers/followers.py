@@ -295,7 +295,7 @@ async def show_my_fans(
 
 
 async def start_broadcast_publisher(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """开始广播（向粉丝发送通知）"""
+    """开始广播（向粉丝发送内容）"""
     query = update.callback_query
     user = update.effective_user
 
@@ -304,20 +304,25 @@ async def start_broadcast_publisher(update: Update, context: ContextTypes.DEFAUL
         await query.answer("你没有相册", show_alert=True)
         return
 
-    context.user_data["broadcast_album_id"] = albums[0]["album_id"]
-    context.user_data["waiting_for"] = "publisher_broadcast"
+    # 创建或获取广播相册
+    broadcast_album_id = db.get_or_create_broadcast_album(user.id)
+
+    context.user_data["broadcast_album_id"] = broadcast_album_id
+    context.user_data["waiting_for"] = "user_broadcast"
+    context.user_data["broadcast_start_time"] = asyncio.get_event_loop().time()
+    context.user_data["broadcast_type"] = "user"  # 标记为用户广播
 
     keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("« 取消", callback_data="cancel_broadcast")]]
+        [[InlineKeyboardButton("« 取消广播", callback_data="cancel_broadcast")]]
     )
 
     await query.edit_message_text(
         "📢 广播功能\n\n"
-        "请输入要发送给所有粉丝的通知内容:\n\n"
-        "格式建议:\n"
-        "• 简短文字说明\n"
-        "• 说明更新了什么内容\n\n"
-        "粉丝会收到一条带按钮的消息，点击可查看新内容。",
+        "请发送要广播的内容：\n\n"
+        "📝 支持：文字、图片、视频、文件\n"
+        "💬 建议添加描述文字\n\n"
+        "内容将直接发送给所有粉丝。\n\n"
+        "⏱️ 60秒内无操作将自动取消",
         reply_markup=keyboard,
     )
 
@@ -384,12 +389,18 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def cancel_broadcast(update, context):
+async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """取消广播"""
     query = update.callback_query
+
+    # 清理所有广播相关状态
     context.user_data.pop("broadcast_album_id", None)
     context.user_data.pop("waiting_for", None)
     context.user_data.pop("broadcast_text", None)
+    context.user_data.pop("broadcast_media_file_id", None)
+    context.user_data.pop("broadcast_media_type", None)
+    context.user_data.pop("broadcast_start_time", None)
+    context.user_data.pop("broadcast_type", None)
 
-    await query.answer("已取消")
+    await query.answer("已取消广播")
     await query.edit_message_text("广播已取消")

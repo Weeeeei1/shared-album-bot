@@ -747,15 +747,23 @@ async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("无权访问", show_alert=True)
         return
 
-    context.user_data["waiting_for"] = "broadcast_message"
+    # 设置广播模式
+    context.user_data["waiting_for"] = "admin_broadcast"
+    context.user_data["broadcast_start_time"] = asyncio.get_event_loop().time()
+    context.user_data["broadcast_type"] = "admin"  # 标记为管理员广播
+
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("« 取消广播", callback_data="cancel_broadcast")]]
+    )
 
     await query.edit_message_text(
-        "📢 广播消息\n\n"
-        "请输入要广播的消息内容：\n\n"
-        "⚠️ 警告：此操作会向所有用户发送消息，请谨慎使用！",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("« 取消", callback_data="admin_menu")]]
-        ),
+        "📢 管理员广播\n\n"
+        "请发送要广播的内容：\n\n"
+        "📝 支持：文字、图片、视频、文件\n"
+        "💬 建议添加描述文字\n\n"
+        "⚠️ 将发送给所有用户，请谨慎！\n\n"
+        "⏱️ 60秒内无操作将自动取消",
+        reply_markup=keyboard,
     )
 
 

@@ -448,6 +448,32 @@ class Database:
             )
             return cursor.lastrowid
 
+    def get_or_create_broadcast_album(self, user_id: int) -> int:
+        """获取或创建用户的广播相册，返回相册ID"""
+        broadcast_name = "📢 广播内容"
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT album_id FROM albums 
+                WHERE owner_id = ? AND name = ?
+            """,
+                (user_id, broadcast_name),
+            )
+            row = cursor.fetchone()
+            if row:
+                return row["album_id"]
+
+            # 创建广播相册
+            cursor.execute(
+                """
+                INSERT INTO albums (owner_id, name, is_public=1)
+                VALUES (?, ?)
+            """,
+                (user_id, broadcast_name),
+            )
+            return cursor.lastrowid
+
     # ========== 媒体操作 ==========
 
     def add_media(
