@@ -613,23 +613,31 @@ async def process_caption_media(
     update: Update, context: ContextTypes.DEFAULT_TYPE, album_id: int
 ):
     """处理留言后选择相册的媒体"""
+    logger.info(f"[CAPTION] process_caption_media called, album_id={album_id}")
+
     query = update.callback_query
     user = update.effective_user
 
     pending = context.user_data.get("pending_media_for_caption")
     caption = context.user_data.get("pending_caption", "好s")
 
+    logger.info(f"[CAPTION] pending={pending is not None}, caption={caption}")
+
     if not pending:
+        logger.warning(f"[CAPTION] No pending media, returning")
         await query.answer("超时，请重新上传媒体", show_alert=True)
         return
 
     album = db.get_album(album_id)
+    logger.info(f"[CAPTION] album found: {album}")
 
     if not album:
+        logger.warning(f"[CAPTION] Album {album_id} not found")
         await query.answer("相册不存在", show_alert=True)
         return
 
     await query.answer()
+    logger.info(f"[CAPTION] Answered callback, now editing message")
 
     # 显示公开/保存选择
     keyboard = [
@@ -641,13 +649,19 @@ async def process_caption_media(
         [InlineKeyboardButton("🔒 仅保存", callback_data="caption_publish_private")],
     ]
 
-    await query.edit_message_text(
-        f"✅ 将保存到相册: {album['name']}\n📝 留言: {caption}\n\n是否公开到频道？",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    try:
+        await query.edit_message_text(
+            f"✅ 将保存到相册: {album['name']}\n📝 留言: {caption}\n\n是否公开到频道？",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        logger.info(f"[CAPTION] Message edited successfully")
+    except Exception as e:
+        logger.error(f"[CAPTION] Failed to edit message: {e}")
+        raise
 
     # 保存选择
     context.user_data["caption_album_id"] = album_id
+    logger.info(f"[CAPTION] Done, caption_album_id set to {album_id}")
 
 
 async def publish_caption_media(
