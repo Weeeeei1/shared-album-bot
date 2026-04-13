@@ -797,6 +797,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("caption_select_album_"):
         album_id = int(data.split("_")[3])
+        logger.info(f"[DEBUG] caption_select_album_ clicked, album_id={album_id}")
         await process_caption_media(update, context, album_id)
 
     elif data == "caption_select_default":
@@ -856,6 +857,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ========== 相册选择 ==========
     elif data.startswith("select_album_save_"):
         album_id = int(data.split("_")[3])
+        logger.info(f"[DEBUG] select_album_save_ clicked, album_id={album_id}")
         context.user_data["selected_album_id"] = album_id
         await ask_public_or_private(update, context)
 
