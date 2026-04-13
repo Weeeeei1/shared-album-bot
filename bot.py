@@ -231,7 +231,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🌐 分享相册给好友，设置访问权限
 
-👇 点击下方按钮开始使用"""
+👇 点击下方按钮开始使用
+
+━━━━━━━━━━━━━━━
+📌 版本: {config.BOT_VERSION}"""
 
     await update.message.reply_text(welcome_text, reply_markup=get_main_menu_keyboard())
 
