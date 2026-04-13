@@ -290,10 +290,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_type = None
     caption = message.caption or ""
 
-    # 如果没有留言，使用默认留言
-    if not caption:
-        caption = "好s"
-
     if message.photo:
         file_id = message.photo[-1].file_id
         file_type = "photo"
@@ -311,6 +307,41 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_type = "voice"
     else:
         await message.reply_text("❌ 不支持的媒体类型")
+        return
+
+    # 如果没有留言，先让用户选择留言方式
+    if not caption:
+        # 保存媒体信息到user_data
+        context.user_data["pending_media_for_caption"] = {
+            "file_id": file_id,
+            "file_type": file_type,
+            "original_message_id": message.message_id,
+            "original_chat_id": user.id,
+        }
+        context.user_data["waiting_for"] = "media_caption"
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "💬 使用默认留言", callback_data="use_default_caption"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "✏️ 自己输入留言", callback_data="input_custom_caption"
+                    )
+                ],
+            ]
+        )
+
+        await message.reply_text(
+            "📝 请为您的媒体添加留言\n\n"
+            "点击下方按钮选择：\n"
+            "• 默认留言：'好s'\n"
+            "• 自己输入：手动输入留言内容",
+            reply_markup=keyboard,
+        )
         return
 
     # 检查是否重复上传（同一文件ID在默认相册中已存在）
@@ -598,6 +629,47 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "cancel_broadcast":
         await cancel_broadcast(update, context)
+
+    # ========== 留言选择 ==========
+    elif data == "use_default_caption":
+        await use_default_caption(update, context)
+
+    elif data == "input_custom_caption":
+        await start_custom_caption_input(update, context)
+
+    elif data == "cancel_caption_input":
+        context.user_data.pop("pending_media_for_caption", None)
+        context.user_data.pop("waiting_for", None)
+        await query.answer("已取消")
+        await query.edit_message_text("已取消输入，媒体未保存")
+
+    elif data.startswith("caption_select_album_"):
+        album_id = int(data.split("_")[3])
+        await process_caption_media(update, context, album_id)
+
+    elif data == "caption_select_default":
+        album_id = db.get_default_album(user.id)
+        await process_caption_media(update, context, album_id)
+
+    elif data == "caption_create_album":
+        context.user_data["waiting_for"] = "caption_new_album"
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("« 取消", callback_data="cancel_caption_create")]]
+        )
+        await query.edit_message_text(
+            "➕ 创建新相册\n\n请发送相册名称：", reply_markup=keyboard
+        )
+
+    elif data == "cancel_caption_create":
+        context.user_data.pop("waiting_for", None)
+        caption = context.user_data.get("pending_caption", "好s")
+        await select_album_for_caption(update, context)
+
+    elif data == "caption_publish_public":
+        await publish_caption_media(update, context, is_public=True)
+
+    elif data == "caption_publish_private":
+        await publish_caption_media(update, context, is_public=False)
 
     # ========== 批量相册选择 ==========
     elif data.startswith("batch_select_album_"):
@@ -1903,6 +1975,53 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # 批量保存到新建的相册
         await process_batch_save(update, context, album_id)
+
+    # ========== 留言输入 ==========
+    elif waiting_for == "custom_caption":
+        # 用户输入自定义留言
+        caption = text.strip()
+        if not caption:
+            await update.message.reply_text("❌ 留言不能为空，请重新输入：")
+            return
+
+        context.user_data["pending_caption"] = caption
+        context.user_data.pop("waiting_for", None)
+
+        # 跳转到相册选择
+        await select_album_for_caption(update, context)
+
+    elif waiting_for == "caption_new_album":
+        # 为留言媒体创建新相册
+        is_valid, result = validate_album_name(text)
+        if not is_valid:
+            await update.message.reply_text(f"❌ {result}")
+            return
+
+        album_id = db.create_album(user.id, result)
+        context.user_data.pop("waiting_for", None)
+        context.user_data["caption_album_id"] = album_id
+
+        # 跳转到公开/保存选择
+        caption = context.user_data.get("pending_caption", "好s")
+        album = db.get_album(album_id)
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "📢 公开到频道（需审核）", callback_data="caption_publish_public"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔒 仅保存", callback_data="caption_publish_private"
+                )
+            ],
+        ]
+
+        await update.message.reply_text(
+            f"✅ 创建相册「{album['name']}」\n📝 留言: {caption}\n\n是否公开到频道？",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
 
     # ========== 设置自动删除时间 ==========
     elif waiting_for and waiting_for.startswith("set_auto_delete_"):
@@ -3480,6 +3599,223 @@ async def show_my_fans(
 
     await query.answer()
     await query.edit_message_text(text, reply_markup=keyboard)
+
+
+async def process_caption_media(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, album_id: int
+):
+    """处理留言后选择相册的媒体"""
+    query = update.callback_query
+    user = update.effective_user
+
+    pending = context.user_data.get("pending_media_for_caption")
+    caption = context.user_data.get("pending_caption", "好s")
+
+    if not pending:
+        await query.answer("超时，请重新上传媒体", show_alert=True)
+        return
+
+    album = db.get_album(album_id)
+
+    # 显示公开/保存选择
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "📢 公开到频道（需审核）", callback_data="caption_publish_public"
+            )
+        ],
+        [InlineKeyboardButton("🔒 仅保存", callback_data="caption_publish_private")],
+    ]
+
+    await query.edit_message_text(
+        f"✅ 将保存到相册: {album['name']}\n📝 留言: {caption}\n\n是否公开到频道？",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+    # 保存选择
+    context.user_data["caption_album_id"] = album_id
+
+
+async def publish_caption_media(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, is_public: bool
+):
+    """发布留言后的单条媒体"""
+    query = update.callback_query
+    user = update.effective_user
+
+    pending = context.user_data.get("pending_media_for_caption")
+    caption = context.user_data.get("pending_caption", "好s")
+    album_id = context.user_data.get("caption_album_id")
+
+    if not pending or not album_id:
+        await query.answer("超时，请重新上传媒体", show_alert=True)
+        return
+
+    album = db.get_album(album_id)
+
+    # 转发到私有群组备份（使用新caption）
+    try:
+        user_info = get_user_info(user)
+        topic_title = f"👤 用户 {user.id}"
+        if user.username:
+            topic_title += f" (@{user.username})"
+        elif user.first_name:
+            topic_title += f" - {user.first_name}"
+
+        full_caption = caption
+        full_caption += f"\n\n{topic_title}" if full_caption else topic_title
+
+        forwarded = await context.bot.copy_message(
+            chat_id=config.PRIVATE_GROUP_ID,
+            from_chat_id=user.id,
+            message_id=pending.get("original_message_id", 0),
+            caption=full_caption,
+        )
+        private_message_id = forwarded.message_id
+    except Exception as e:
+        logger.warning(f"转发媒体失败: {e}")
+        private_message_id = 0
+
+    # 保存到数据库
+    media_id = db.add_media(
+        album_id=album_id,
+        user_id=user.id,
+        file_id=pending["file_id"],
+        file_type=pending["file_type"],
+        caption=caption,
+        private_message_id=private_message_id,
+    )
+
+    # 清理user_data
+    context.user_data.pop("pending_media_for_caption", None)
+    context.user_data.pop("pending_caption", None)
+    context.user_data.pop("caption_album_id", None)
+
+    # 如果选择公开，发送到审核
+    if is_public:
+        try:
+            review_id = db.add_pending_review(
+                media_id=media_id,
+                user_id=user.id,
+                album_id=album_id,
+                file_id=pending["file_id"],
+                file_type=pending["file_type"],
+                caption=caption,
+                private_message_id=private_message_id,
+            )
+
+            await query.answer("✅ 已保存并提交审核")
+            await query.edit_message_text(
+                f"✅ 已保存到相册「{album['name']}」\n"
+                f"📝 留言: {caption}\n\n"
+                f"已提交公开审核，等待管理员批准后会在频道展示。",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("« 返回主菜单", callback_data="menu_main")]]
+                ),
+            )
+        except Exception as e:
+            logger.error(f"提交审核失败: {e}")
+            await query.answer("❌ 审核提交失败", show_alert=True)
+    else:
+        await query.answer("✅ 已保存")
+        await query.edit_message_text(
+            f"✅ 已保存到相册「{album['name']}」\n📝 留言: {caption}",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("« 返回主菜单", callback_data="menu_main")]]
+            ),
+        )
+
+    # 通知粉丝
+    try:
+        task_manager.spawn(
+            notify_followers(context, album_id, user.id),
+            name=f"notify_followers_{album_id}",
+        )
+    except Exception:
+        pass
+
+
+async def use_default_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """使用默认留言"""
+    query = update.callback_query
+    user = update.effective_user
+
+    pending = context.user_data.get("pending_media_for_caption")
+    if not pending:
+        await query.answer("超时，请重新上传媒体", show_alert=True)
+        return
+
+    # 使用默认留言
+    caption = "好s"
+    context.user_data["pending_caption"] = caption
+    context.user_data.pop("pending_media_for_caption", None)
+
+    # 让用户选择相册
+    await query.answer()
+    await select_album_for_caption(update, context)
+
+
+async def start_custom_caption_input(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    """让用户输入自定义留言"""
+    query = update.callback_query
+    user = update.effective_user
+
+    pending = context.user_data.get("pending_media_for_caption")
+    if not pending:
+        await query.answer("超时，请重新上传媒体", show_alert=True)
+        return
+
+    context.user_data["waiting_for"] = "custom_caption"
+
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("« 取消", callback_data="cancel_caption_input")]]
+    )
+
+    await query.answer()
+    await query.edit_message_text("✏️ 请输入您的留言内容：", reply_markup=keyboard)
+
+
+async def select_album_for_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """选择相册并继续处理媒体"""
+    user = update.effective_user
+    query = update.callback_query if hasattr(update, "callback_query") else None
+
+    albums = db.get_user_albums(user.id)
+    caption = context.user_data.get("pending_caption", "好s")
+
+    keyboard = []
+    for album in albums:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"📁 {album['name']}",
+                    callback_data=f"caption_select_album_{album['album_id']}",
+                )
+            ]
+        )
+
+    keyboard.append(
+        [InlineKeyboardButton("➕ 创建新相册", callback_data="caption_create_album")]
+    )
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                "🔘 跳过（存默认相册）", callback_data="caption_select_default"
+            )
+        ]
+    )
+
+    text = f"📝 留言: {caption}\n\n请选择要保存到的相册："
+
+    if query:
+        await query.answer()
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await context.bot.send_message(
+            chat_id=user.id, text=text, reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
 
 async def start_broadcast_publisher(update: Update, context: ContextTypes.DEFAULT_TYPE):
