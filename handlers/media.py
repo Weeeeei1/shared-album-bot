@@ -457,6 +457,13 @@ async def ask_public_or_private(update: Update, context: ContextTypes.DEFAULT_TY
     album_id = context.user_data.get("selected_album_id")
     album = db.get_album(album_id)
 
+    if not album:
+        await query.answer("相册不存在，请重新选择", show_alert=True)
+        await show_album_selection(update, context)
+        return
+
+    await query.answer()
+
     keyboard = [
         [
             InlineKeyboardButton(
