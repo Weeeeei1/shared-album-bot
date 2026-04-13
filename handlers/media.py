@@ -618,12 +618,17 @@ async def process_caption_media(
     query = update.callback_query
     user = update.effective_user
 
+    # 优先使用 pending_media_for_caption（单条），如果没有则使用 pending_media_list（批量）
     pending = context.user_data.get("pending_media_for_caption")
+    media_list = context.user_data.get("pending_media_list", [])
+
     caption = context.user_data.get("pending_caption", "好s")
 
-    logger.info(f"[CAPTION] pending={pending is not None}, caption={caption}")
+    logger.info(
+        f"[CAPTION] pending_media_for_caption={'set' if pending else 'None'}, pending_media_list len={len(media_list)}, caption={caption}"
+    )
 
-    if not pending:
+    if not pending and not media_list:
         logger.warning(f"[CAPTION] No pending media, returning")
         await query.answer("超时，请重新上传媒体", show_alert=True)
         return
@@ -659,7 +664,7 @@ async def process_caption_media(
         logger.error(f"[CAPTION] Failed to edit message: {e}")
         raise
 
-    # 保存选择
+    # 保存选择 - 同时保存单条和批量媒体的信息
     context.user_data["caption_album_id"] = album_id
     logger.info(f"[CAPTION] Done, caption_album_id set to {album_id}")
 
