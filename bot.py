@@ -378,8 +378,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         db.add_media(broadcast_album_id, user.id, file_id, file_type, caption)
 
-        # 直接发送给所有访客（点击过分享链接的人）
-        audience = db.get_audience(user.id, broadcast_album_id)
+        # 直接发送给所有访客（点击过分享链接的人）- 获取所有相册的访客
+        audience = db.get_all_audience(user.id)
         sent = 0
         for viewer_id in audience:
             try:
@@ -2362,8 +2362,8 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
         # 保存到广播相册
         db.add_media(broadcast_album_id, user.id, "text", "text", text)
 
-        # 直接发送给所有观众（点击过分享链接的人）
-        audience = db.get_audience(user.id, broadcast_album_id)
+        # 直接发送给所有观众（点击过分享链接的人）- 获取所有相册的观众
+        audience = db.get_all_audience(user.id)
         sent = 0
         for viewer_id in audience:
             try:
@@ -4136,7 +4136,8 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     album = db.get_album(album_id)
-    audience = db.get_audience(user.id, album_id)
+    # 获取所有相册的观众（不只是当前相册的）
+    audience = db.get_all_audience(user.id)
 
     if not audience:
         await query.answer("没有观众可以通知", show_alert=True)

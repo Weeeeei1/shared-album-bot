@@ -879,6 +879,16 @@ class Database:
             )
             return [row["viewer_id"] for row in cursor.fetchall()]
 
+    def get_all_audience(self, publisher_id: int) -> List[int]:
+        """Get all audience (viewers who clicked share link) user_ids for ALL albums of a publisher"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT DISTINCT viewer_id FROM audience WHERE publisher_id = ?",
+                (publisher_id,),
+            )
+            return [row["viewer_id"] for row in cursor.fetchall()]
+
     def add_follower(self, follower_id: int, publisher_id: int, album_id: int):
         """Add follower relationship; upsert timestamp"""
         with self.get_connection() as conn:
