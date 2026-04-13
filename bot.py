@@ -3276,6 +3276,7 @@ async def view_new_content(update, context, album_id):
     has_more = len(new_media) > 10
     album = db.get_album(album_id)
     total = len(display_media)
+    protect = album.get("protect_content", 0) == 1
     await context.bot.send_message(
         chat_id=user.id,
         text=f"🆕 新内容 ({total} 条)"
@@ -3286,15 +3287,24 @@ async def view_new_content(update, context, album_id):
         try:
             if media_item["file_type"] == "photo":
                 await context.bot.send_photo(
-                    chat_id=user.id, photo=media_item["file_id"], caption=caption
+                    chat_id=user.id,
+                    photo=media_item["file_id"],
+                    caption=caption,
+                    protect_content=protect,
                 )
             elif media_item["file_type"] == "video":
                 await context.bot.send_video(
-                    chat_id=user.id, video=media_item["file_id"], caption=caption
+                    chat_id=user.id,
+                    video=media_item["file_id"],
+                    caption=caption,
+                    protect_content=protect,
                 )
             else:
                 await context.bot.send_document(
-                    chat_id=user.id, document=media_item["file_id"], caption=caption
+                    chat_id=user.id,
+                    document=media_item["file_id"],
+                    caption=caption,
+                    protect_content=protect,
                 )
         except Exception as e:
             logger.warning(f"发送新内容失败: {e}")
