@@ -145,9 +145,9 @@ async def view_shared_album(
                     )
                 sent_message_ids.append(msg.message_id)
 
-                # 每发送一条消息后延迟0.5秒，避免触发Telegram限流
+                # 减少延迟以加快发送速度，但仍需避免触发Telegram限流
                 if idx < total - 1:
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.05)
 
             except Exception as e:
                 logger.warning(f"发送媒体 {idx + 1} 失败: {e}")
