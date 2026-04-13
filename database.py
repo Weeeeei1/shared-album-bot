@@ -219,6 +219,49 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS idx_pending_reviews_status ON pending_reviews(status)"
             )
 
+            # Add follower/audience tracking tables
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS followers (
+                    follower_id INTEGER NOT NULL,
+                    publisher_id INTEGER NOT NULL,
+                    album_id INTEGER NOT NULL,
+                    followed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (follower_id, album_id),
+                    FOREIGN KEY (album_id) REFERENCES albums(album_id),
+                    FOREIGN KEY (publisher_id) REFERENCES users(user_id)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS audience (
+                    viewer_id INTEGER NOT NULL,
+                    publisher_id INTEGER NOT NULL,
+                    album_id INTEGER NOT NULL,
+                    first_viewed_at TIMESTAMP,
+                    last_viewed_at TIMESTAMP,
+                    PRIMARY KEY (viewer_id, album_id),
+                    FOREIGN KEY (album_id) REFERENCES albums(album_id),
+                    FOREIGN KEY (viewer_id) REFERENCES users(user_id),
+                    FOREIGN KEY (publisher_id) REFERENCES users(user_id)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_last_viewed (
+                    user_id INTEGER NOT NULL,
+                    album_id INTEGER NOT NULL,
+                    last_viewed_media_id INTEGER,
+                    last_viewed_at TIMESTAMP,
+                    PRIMARY KEY (user_id, album_id),
+                    FOREIGN KEY (album_id) REFERENCES albums(album_id),
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+                """
+            )
+
     # ========== 用户操作 ==========
 
     def add_user(self, user_id: int, username: str, first_name: str, last_name: str):
@@ -758,6 +801,175 @@ class Database:
                 (user_id,),
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    # ======= 新增： follower/audience 跟踪相关方法 =======
+    def add_audience(self, viewer_id: int, publisher_id: int, album_id: int):
+        """Add or update audience record for a viewer on an album"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Check existence
+            cursor.execute(
+                "SELECT 1 FROM audience WHERE viewer_id = ? AND album_id = ?",
+                (viewer_id, album_id),
+            )
+            exists = cursor.fetchone() is not None
+            if exists:
+                cursor.execute(
+                    """
+                    UPDATE audience
+                    SET publisher_id = ?, last_viewed_at = CURRENT_TIMESTAMP
+                    WHERE viewer_id = ? AND album_id = ?
+                    """,
+                    (publisher_id, viewer_id, album_id),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO audience (viewer_id, publisher_id, album_id, first_viewed_at, last_viewed_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """,
+                    (viewer_id, publisher_id, album_id),
+                )
+
+    def get_audience_count(self, publisher_id: int, album_id: int) -> int:
+        """Count audience members for a specific album of a publisher"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM audience WHERE publisher_id = ? AND album_id = ?",
+                (publisher_id, album_id),
+            )
+            row = cursor.fetchone()
+            return row["count"] if row and "count" in row.keys() else 0
+
+    def add_follower(self, follower_id: int, publisher_id: int, album_id: int):
+        """Add follower relationship; upsert timestamp"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO followers (follower_id, publisher_id, album_id, followed_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(follower_id, album_id) DO UPDATE SET
+                    publisher_id = excluded.publisher_id,
+                    followed_at = CURRENT_TIMESTAMP
+                """,
+                (follower_id, publisher_id, album_id),
+            )
+
+    def remove_follower(self, follower_id: int, album_id: int):
+        """Remove follower from an album"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM followers WHERE follower_id = ? AND album_id = ?",
+                (follower_id, album_id),
+            )
+
+    def is_following(self, follower_id: int, album_id: int) -> bool:
+        """Check if a user is following an album"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT 1 FROM followers WHERE follower_id = ? AND album_id = ?",
+                (follower_id, album_id),
+            )
+            return cursor.fetchone() is not None
+
+    def get_follower_count(self, publisher_id: int, album_id: int) -> int:
+        """Count followers for a specific album"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM followers WHERE publisher_id = ? AND album_id = ?",
+                (publisher_id, album_id),
+            )
+            row = cursor.fetchone()
+            return row["count"] if row and "count" in row.keys() else 0
+
+    def get_followers(self, publisher_id: int, album_id: int) -> List[int]:
+        """Get all follower user_ids for a given album"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT follower_id FROM followers WHERE publisher_id = ? AND album_id = ?",
+                (publisher_id, album_id),
+            )
+            return [row["follower_id"] for row in cursor.fetchall()]
+
+    def update_last_viewed(
+        self, user_id: int, album_id: int, last_viewed_media_id: int
+    ):
+        """Update last viewed media for a user on an album"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE user_last_viewed
+                SET last_viewed_media_id = ?, last_viewed_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND album_id = ?
+                """,
+                (last_viewed_media_id, user_id, album_id),
+            )
+            if cursor.rowcount == 0:
+                cursor.execute(
+                    """
+                    INSERT INTO user_last_viewed (user_id, album_id, last_viewed_media_id, last_viewed_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (user_id, album_id, last_viewed_media_id),
+                )
+
+    def get_last_viewed(self, user_id: int, album_id: int) -> Optional[Dict[str, Any]]:
+        """Get last viewed media id and time for a user on an album"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT last_viewed_media_id, last_viewed_at FROM user_last_viewed WHERE user_id = ? AND album_id = ?",
+                (user_id, album_id),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_new_media_since(
+        self, album_id: int, last_viewed_media_id: Optional[int]
+    ) -> List[Dict[str, Any]]:
+        """Get media added after the given media_id for an album"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if last_viewed_media_id is None:
+                cursor.execute(
+                    "SELECT * FROM media WHERE album_id = ? ORDER BY media_id ASC",
+                    (album_id,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM media WHERE album_id = ? AND media_id > ? ORDER BY media_id ASC",
+                    (album_id, last_viewed_media_id),
+                )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_publisher_audience_count(self, publisher_id: int) -> int:
+        """Total audience across all albums for a publisher"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM audience WHERE publisher_id = ?",
+                (publisher_id,),
+            )
+            row = cursor.fetchone()
+            return row["count"] if row and "count" in row.keys() else 0
+
+    def get_publisher_follower_count(self, publisher_id: int) -> int:
+        """Total followers across all albums for a publisher"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as count FROM followers WHERE publisher_id = ?",
+                (publisher_id,),
+            )
+            row = cursor.fetchone()
+            return row["count"] if row and "count" in row.keys() else 0
 
 
 # 全局数据库实例

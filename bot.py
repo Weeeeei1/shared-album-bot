@@ -189,6 +189,7 @@ def get_main_menu_keyboard():
         [
             [InlineKeyboardButton("📤 上传媒体", callback_data="menu_upload")],
             [InlineKeyboardButton("📁 我的相册", callback_data="menu_albums")],
+            [InlineKeyboardButton("👥 我的粉丝", callback_data="my_fans_menu")],
             [InlineKeyboardButton("➕ 创建相册", callback_data="menu_create")],
             [InlineKeyboardButton("📊 系统统计", callback_data="menu_stats")],
             [InlineKeyboardButton("❓ 使用帮助", callback_data="menu_help")],
@@ -564,6 +565,39 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "menu_help":
         await show_help(update, context)
+
+    # follower/fan related actions
+    elif data.startswith("follow_"):
+        album_id = int(data.split("_")[1])
+        await follow_publisher(update, context, album_id)
+
+    elif data.startswith("unfollow_"):
+        album_id = int(data.split("_")[1])
+        await unfollow_publisher(update, context, album_id)
+
+    elif data.startswith("new_content_"):
+        album_id = int(data.split("_")[2])
+        await view_new_content(update, context, album_id)
+
+    elif data.startswith("full_album_"):
+        album_id = int(data.split("_")[2])
+        await view_full_album(update, context, album_id)
+
+    elif data.startswith("my_fans_"):
+        album_id = int(data.split("_")[2])
+        await show_my_fans(update, context, album_id)
+
+    elif data == "my_fans_menu":
+        await show_fans_menu(update, context)
+
+    elif data == "broadcast_start":
+        await start_broadcast_publisher(update, context)
+
+    elif data.startswith("broadcast_confirm_"):
+        await confirm_broadcast(update, context)
+
+    elif data == "cancel_broadcast":
+        await cancel_broadcast(update, context)
 
     # ========== 批量相册选择 ==========
     elif data.startswith("batch_select_album_"):
@@ -1112,6 +1146,14 @@ async def publish_batch_media(
             caption=pending["caption"],
             private_message_id=pending["private_message_id"],
         )
+        # Notify followers about new content
+        try:
+            task_manager.spawn(
+                notify_followers(context, album_id, user.id),
+                name=f"notify_followers_{album_id}",
+            )
+        except Exception:
+            pass
         saved_count += 1
 
         # 如果用户选择公开，发送到私密群组等待审核
@@ -1254,6 +1296,14 @@ async def publish_media(
         caption=pending["caption"],
         private_message_id=pending["private_message_id"],
     )
+    # Notify followers about new content
+    try:
+        task_manager.spawn(
+            notify_followers(context, album_id, user.id),
+            name=f"notify_followers_{album_id}",
+        )
+    except Exception:
+        pass
 
     # 如果用户选择公开，发送到私密群组等待审核
     if is_public:
@@ -1966,6 +2016,30 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
+    elif waiting_for == "publisher_broadcast":
+        # 发布者广播（向粉丝发送通知）
+        album_id = context.user_data.get("broadcast_album_id")
+        if not album_id:
+            return
+
+        album = db.get_album(album_id)
+        context.user_data["broadcast_text"] = text
+
+        text_display = f"📢 确认广播?\n\n相册: {album['name']}\n\n内容:\n{text}\n\n点击确认发送或取消:"
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "✅ 确认发送", callback_data="broadcast_confirm"
+                    )
+                ],
+                [InlineKeyboardButton("« 取消", callback_data="cancel_broadcast")],
+            ]
+        )
+
+        await update.message.reply_text(text_display, reply_markup=keyboard)
+
 
 async def start_create_album(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """开始创建相册流程"""
@@ -2458,6 +2532,20 @@ async def view_shared_album(
             # 发送通知给相册创建者
             await notify_album_owner(context, album["owner_id"], user, album["name"])
 
+            # 关注人群统计/记录
+            try:
+                db.add_audience(user.id, album["owner_id"], album_id)
+            except Exception:
+                pass
+            # 更新观看位置为相册中的最后一条媒体
+            try:
+                media_list = db.get_album_media(album_id)
+                last_media_id = media_list[-1]["media_id"] if media_list else None
+                if last_media_id is not None:
+                    db.update_last_viewed(user.id, album_id, last_media_id)
+            except Exception:
+                pass
+
     # 获取所有媒体
     media = db.get_album_media(album_id)
 
@@ -2520,18 +2608,35 @@ async def view_shared_album(
         viewer_count = db.get_unique_viewers_count(album_id)
 
         # 发送完成提示
-        finish_text = f"✅ 相册「{album['name']}」已全部加载完成！\n\n👀 你是第 {viewer_count} 位观众\n\n⏱️ 内容将在 {auto_delete_seconds // 60} 分钟后自动消失"
+        finish_text = f"✅ 相册「{album['name']}」已全部加载完成！\\n\\n👀 你是第 {viewer_count} 位观众\\n\\n⏱️ 内容将在 {auto_delete_seconds // 60} 分钟后自动消失"
 
-        finish_keyboard = InlineKeyboardMarkup(
+        # 构建完成页按钮：先关注按钮再机器人入口
+        keyboard_rows = []
+        if album["owner_id"] != user.id:
+            if db.is_following(user.id, album_id):
+                keyboard_rows.append(
+                    [
+                        InlineKeyboardButton(
+                            "🔔 已关注", callback_data=f"unfollow_{album_id}"
+                        )
+                    ]
+                )
+            else:
+                keyboard_rows.append(
+                    [
+                        InlineKeyboardButton(
+                            "✅ 关注发布者", callback_data=f"follow_{album_id}"
+                        )
+                    ]
+                )
+        keyboard_rows.append(
             [
-                [
-                    InlineKeyboardButton(
-                        "🤖 使用机器人创建相册",
-                        url=f"https://t.me/{context.bot.username}",
-                    )
-                ]
+                InlineKeyboardButton(
+                    "🤖 使用机器人创建相册", url=f"https://t.me/{context.bot.username}"
+                )
             ]
         )
+        finish_keyboard = InlineKeyboardMarkup(keyboard_rows)
 
         finish_message = await update.message.reply_text(
             finish_text, reply_markup=finish_keyboard
@@ -3102,6 +3207,373 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ========== 主程序 ==========
+
+
+async def follow_publisher(update, context, album_id):
+    """关注相册发布者"""
+    query = update.callback_query
+    user = update.effective_user
+    album = db.get_album(album_id)
+    publisher_id = album["owner_id"]
+    if publisher_id == user.id:
+        await query.answer("不能关注自己", show_alert=True)
+        return
+    if db.is_following(user.id, album_id):
+        await query.answer("已经关注过了", show_alert=True)
+        return
+    db.add_follower(user.id, publisher_id, album_id)
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🔔 已关注", callback_data=f"unfollow_{album_id}")],
+            [
+                InlineKeyboardButton(
+                    "📂 查看完整相册", callback_data=f"full_album_{album_id}"
+                )
+            ],
+        ]
+    )
+    try:
+        await query.answer("✅ 关注成功！有新内容时会收到通知", show_alert=True)
+        await query.edit_message_reply_markup(reply_markup=keyboard)
+    except Exception:
+        pass
+
+
+async def unfollow_publisher(update, context, album_id):
+    """取消关注"""
+    query = update.callback_query
+    user = update.effective_user
+    db.remove_follower(user.id, album_id)
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("✅ 关注发布者", callback_data=f"follow_{album_id}")],
+            [
+                InlineKeyboardButton(
+                    "📂 查看完整相册", callback_data=f"full_album_{album_id}"
+                )
+            ],
+        ]
+    )
+    await query.answer("已取消关注")
+    try:
+        await query.edit_message_reply_markup(reply_markup=keyboard)
+    except Exception:
+        pass
+
+
+async def view_new_content(update, context, album_id):
+    """查看新内容（自上次查看后新增的）"""
+    query = update.callback_query
+    user = update.effective_user
+    last_viewed = db.get_last_viewed(user.id, album_id)
+    last_media_id = last_viewed["last_viewed_media_id"] if last_viewed else None
+    new_media = db.get_new_media_since(album_id, last_media_id)
+    if not new_media:
+        await query.answer("暂无新内容", show_alert=True)
+        return
+    await query.answer()
+    display_media = new_media[:10]
+    has_more = len(new_media) > 10
+    album = db.get_album(album_id)
+    total = len(display_media)
+    await context.bot.send_message(
+        chat_id=user.id,
+        text=f"🆕 新内容 ({total} 条)"
+        + (f" 还有{len(new_media) - 10}条..." if has_more else ""),
+    )
+    for idx, media_item in enumerate(display_media):
+        caption = f"🆕 {idx + 1}/{total}\n\n💬 {media_item['caption'] or '无描述'}"
+        try:
+            if media_item["file_type"] == "photo":
+                await context.bot.send_photo(
+                    chat_id=user.id, photo=media_item["file_id"], caption=caption
+                )
+            elif media_item["file_type"] == "video":
+                await context.bot.send_video(
+                    chat_id=user.id, video=media_item["file_id"], caption=caption
+                )
+            else:
+                await context.bot.send_document(
+                    chat_id=user.id, document=media_item["file_id"], caption=caption
+                )
+        except Exception as e:
+            logger.warning(f"发送新内容失败: {e}")
+        await asyncio.sleep(0.3)
+    if display_media:
+        last_item = display_media[-1]
+        db.update_last_viewed(user.id, album_id, last_item["media_id"])
+    keyboard_buttons = []
+    if has_more:
+        keyboard_buttons.append(
+            [
+                InlineKeyboardButton(
+                    f"查看完整相册还有{len(new_media) - 10}条",
+                    callback_data=f"full_album_{album_id}",
+                )
+            ]
+        )
+    keyboard_buttons.append(
+        [InlineKeyboardButton("« 返回主菜单", callback_data="menu_main")]
+    )
+    await context.bot.send_message(
+        chat_id=user.id,
+        text="👆 以上是自上次查看后的新内容",
+        reply_markup=InlineKeyboardMarkup(keyboard_buttons),
+    )
+
+
+async def view_full_album(update, context, album_id):
+    """查看完整相册"""
+    query = update.callback_query
+    user = update.effective_user
+    album = db.get_album(album_id)
+    media = db.get_album_media(album_id)
+    if not media:
+        await query.answer("相册为空", show_alert=True)
+        return
+    await query.answer()
+    db.update_last_viewed(user.id, album_id, media[-1]["media_id"])
+    total = len(media)
+    protect = album.get("protect_content", 0) == 1
+    for idx, media_item in enumerate(media):
+        caption = f"📎 {idx + 1}/{total}\n\n💬 {media_item['caption'] or '无描述'}"
+        try:
+            if media_item["file_type"] == "photo":
+                await context.bot.send_photo(
+                    chat_id=user.id,
+                    photo=media_item["file_id"],
+                    caption=caption,
+                    protect_content=protect,
+                )
+            elif media_item["file_type"] == "video":
+                await context.bot.send_video(
+                    chat_id=user.id,
+                    video=media_item["file_id"],
+                    caption=caption,
+                    protect_content=protect,
+                )
+            else:
+                await context.bot.send_document(
+                    chat_id=user.id,
+                    document=media_item["file_id"],
+                    caption=caption,
+                    protect_content=protect,
+                )
+        except Exception as e:
+            logger.warning(f"发送媒体失败: {e}")
+        await asyncio.sleep(0.3)
+    await context.bot.send_message(
+        chat_id=user.id,
+        text=f"✅ 相册「{album['name']}」已全部加载完成！",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("« 返回主菜单", callback_data=f"menu_main")]]
+        ),
+    )
+
+
+async def notify_followers(context, album_id, publisher_id):
+    """通知粉丝有新内容"""
+    try:
+        album = db.get_album(album_id)
+        followers = db.get_followers(publisher_id, album_id)
+        if not followers:
+            return
+        for follower_id in followers:
+            try:
+                keyboard = InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                "🆕 更新啦！！更新啦！！",
+                                callback_data=f"new_content_{album_id}",
+                            )
+                        ]
+                    ]
+                )
+                await context.bot.send_message(
+                    chat_id=follower_id,
+                    text=f"📢 相册「{album['name']}」有更新啦！",
+                    reply_markup=keyboard,
+                )
+                await asyncio.sleep(0.2)
+            except Exception as e:
+                logger.warning(f"通知粉丝 {follower_id} 失败: {e}")
+    except Exception as e:
+        logger.error(f"通知粉丝失败: {e}")
+
+
+async def show_fans_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """显示粉丝管理入口"""
+    query = update.callback_query
+    user = update.effective_user
+
+    albums = db.get_user_albums(user.id)
+
+    if not albums:
+        await query.answer("你没有相册", show_alert=True)
+        return
+
+    keyboard = []
+    for album in albums:
+        follower_count = db.get_follower_count(user.id, album["album_id"])
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"📁 {album['name']} ({follower_count}粉丝)",
+                    callback_data=f"my_fans_{album['album_id']}",
+                )
+            ]
+        )
+
+    keyboard.append([InlineKeyboardButton("« 返回主菜单", callback_data="menu_main")])
+
+    await query.edit_message_text(
+        "📊 我的粉丝\n\n选择相册查看粉丝统计:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+
+async def show_my_fans(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, album_id: int
+):
+    """显示指定相册的粉丝统计"""
+    query = update.callback_query
+    user = update.effective_user
+
+    album = db.get_album(album_id)
+
+    # Verify ownership
+    if album["owner_id"] != user.id:
+        await query.answer("无权访问", show_alert=True)
+        return
+
+    follower_count = db.get_follower_count(user.id, album_id)
+    audience_count = db.get_audience_count(user.id, album_id)
+
+    text = f"""📊 相册「{album["name"]}」统计
+
+👥 粉丝数: {follower_count} (关注了你的人数)
+👀 用户数: {audience_count} (访问过链接的人数)
+
+💡 粉丝会收到新内容通知，用户不会"""
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📢 广播通知", callback_data="broadcast_start")],
+            [
+                InlineKeyboardButton(
+                    "« 返回相册", callback_data=f"view_album_{album_id}"
+                )
+            ],
+        ]
+    )
+
+    await query.answer()
+    await query.edit_message_text(text, reply_markup=keyboard)
+
+
+async def start_broadcast_publisher(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """开始广播（向粉丝发送通知）"""
+    query = update.callback_query
+    user = update.effective_user
+
+    # Get all albums for this user
+    albums = db.get_user_albums(user.id)
+
+    if not albums:
+        await query.answer("你没有相册", show_alert=True)
+        return
+
+    # Store which album we're broadcasting for
+    context.user_data["broadcast_album_id"] = albums[0]["album_id"]
+    context.user_data["waiting_for"] = "publisher_broadcast"
+
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("« 取消", callback_data="cancel_broadcast")]]
+    )
+
+    await query.edit_message_text(
+        "📢 广播功能\n\n"
+        "请输入要发送给所有粉丝的通知内容:\n\n"
+        "格式建议:\n"
+        "• 简短文字说明\n"
+        "• 说明更新了什么内容\n\n"
+        "粉丝会收到一条带按钮的消息，点击可查看新内容。",
+        reply_markup=keyboard,
+    )
+
+
+async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """确认广播"""
+    query = update.callback_query
+    user = update.effective_user
+
+    album_id = context.user_data.get("broadcast_album_id")
+    message_text = context.user_data.get("broadcast_text", "")
+
+    if not album_id:
+        await query.answer("广播已取消", show_alert=True)
+        return
+
+    album = db.get_album(album_id)
+    followers = db.get_followers(user.id, album_id)
+
+    if not followers:
+        await query.answer("没有粉丝可以通知", show_alert=True)
+        return
+
+    # Send notification to each follower
+    sent = 0
+    for follower_id in followers:
+        try:
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "🆕 查看新内容", callback_data=f"new_content_{album_id}"
+                        )
+                    ]
+                ]
+            )
+            await context.bot.send_message(
+                chat_id=follower_id,
+                text=f"📢 {album['name']} 有新更新！\n\n{message_text}",
+                reply_markup=keyboard,
+            )
+            sent += 1
+            await asyncio.sleep(0.1)  # Rate limit
+        except Exception as e:
+            logger.warning(f"发送广播给 {follower_id} 失败: {e}")
+
+    await query.answer(f"✅ 已发送给 {sent} 位粉丝")
+
+    context.user_data.pop("broadcast_album_id", None)
+    context.user_data.pop("waiting_for", None)
+    context.user_data.pop("broadcast_text", None)
+
+    await query.edit_message_text(
+        f"✅ 广播已发送!\n\n已发送给 {sent} 位粉丝。",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "« 返回相册", callback_data=f"view_album_{album_id}"
+                    )
+                ]
+            ]
+        ),
+    )
+
+
+async def cancel_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """取消广播"""
+    query = update.callback_query
+    context.user_data.pop("broadcast_album_id", None)
+    context.user_data.pop("waiting_for", None)
+    context.user_data.pop("broadcast_text", None)
+
+    await query.answer("已取消")
+    await query.edit_message_text("广播已取消")
 
 
 def main():
