@@ -17,3 +17,6 @@ __pycache__/
 # 临时文件
 *.tmp
 .env
+
+# 本地Agent配置(包含敏感信息)
+AGENTS.md
