@@ -105,4 +105,75 @@ pytest tests/test_database.py -v
 ## 已知问题
 
 1. ~~**重复函数**: `handle_media` 定义了两次~~ ✅ 已修复
-2. **无 CI/CD**: 无 GitHub Actions、linting 或类型检查
+2. ~~**topic_mappings 表缺失**~~ ✅ 已修复
+3. ~~**toggle_download_ 重复代码**~~ ✅ 已修复
+4. ~~**配置写入竞态条件**~~ ✅ 已修复
+5. ~~**日志泄露敏感信息**~~ ✅ 已修复
+6. ~~**数据库索引缺失**~~ ✅ 已修复
+7. ~~**approve_review 回调应答缺失**~~ ✅ 已修复
+8. **无 CI/CD**: 无 GitHub Actions、linting 或类型检查
+
+## 服务器部署信息
+
+| 属性 | 值 |
+|------|-----|
+| 服务器地址 | 129.226.213.40 |
+| 项目路径 | /root/.openclaw/workspace/shared-album-bot |
+| GitHub 仓库 | https://github.com/Weeeeei1/shared-album-bot |
+
+### 部署步骤
+
+```bash
+# 1. SSH 连接到服务器
+ssh root@129.226.213.40
+
+# 2. 进入项目目录
+cd /root/.openclaw/workspace/shared-album-bot
+
+# 3. 拉取最新代码
+git pull origin main
+
+# 4. 安装依赖
+pip install -r requirements.txt
+
+# 5. 重启服务（Docker 模式）
+docker-compose down && docker-compose up -d
+
+# 或者 Systemd 模式
+sudo systemctl restart shared-album-bot
+
+# 6. 查看日志验证
+docker-compose logs -f
+# 或
+sudo journalctl -u shared-album-bot -f
+```
+
+### 回滚步骤
+
+```bash
+# 查看最近提交
+git log --oneline -5
+
+# 回滚到上一个稳定版本
+git revert HEAD
+git push origin main
+
+# 重启服务
+docker-compose down && docker-compose up -d
+# 或
+sudo systemctl restart shared-album-bot
+```
+
+### 环境变量配置
+
+服务器上需要在 `.env` 文件或系统环境中设置：
+
+```bash
+BOT_TOKEN=<your_bot_token>
+PUBLIC_CHANNEL_ID=<your_channel_id>
+PRIVATE_GROUP_ID=<your_group_id>
+ADMIN_USER_ID=<your_admin_id>
+DATABASE_FILE=shared_album_bot.db
+LOG_FILE=bot.log
+LOG_LEVEL=INFO
+```

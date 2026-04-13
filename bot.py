@@ -728,16 +728,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_value = 1 if current == 0 else 0
         db.update_album_settings(album_id, allow_download=new_value)
         status = "允许" if new_value else "禁止"
-        await query.answer(f"✅ 下载权限已设为{status}", show_alert=True)
-        await show_album_settings(update, context, album_id)
-
-    elif data.startswith("toggle_download_"):
-        album_id = int(data.split("_")[2])
-        album = db.get_album(album_id)
-        current = album.get("allow_download", 0)
-        new_value = 1 if current == 0 else 0
-        db.update_album_settings(album_id, allow_download=new_value)
-        status = "允许" if new_value else "禁止"
         await query.answer(f"✅ 下载权限已{status}", show_alert=True)
         await show_album_settings(update, context, album_id)
 
@@ -1491,7 +1481,8 @@ async def show_preview(
                 except Exception as e:
                     logger.warning(f"自动删除消息失败: {e}")
 
-            # 启动后台任务删除消息
+            # asyncio.create_task 返回的 Task 会被事件循环保留引用，
+            # 只要事件循环在运行，任务就会执行完成，无需手动跟踪
             asyncio.create_task(delete_message_after_delay())
 
     except Exception as e:
@@ -1634,20 +1625,7 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
 
         try:
             new_channel_id = int(text)
-            # 更新配置文件
-            import re
-
-            with open("config.py", "r") as f:
-                content = f.read()
-            content = re.sub(
-                r"PUBLIC_CHANNEL_ID = -?\d+",
-                f"PUBLIC_CHANNEL_ID = {new_channel_id}",
-                content,
-            )
-            with open("config.py", "w") as f:
-                f.write(content)
-
-            # 更新内存中的配置
+            # 只更新内存中的配置（写入文件需要重载环境变量，不可靠）
             config.PUBLIC_CHANNEL_ID = new_channel_id
 
             context.user_data.pop("waiting_for", None)
@@ -1656,7 +1634,7 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
                 [InlineKeyboardButton("« 返回系统设置", callback_data="admin_settings")]
             ]
             await update.message.reply_text(
-                f"✅ 公开频道ID已更新为: {new_channel_id}\n\n注意：此更改在内存中已生效，重启后将永久保存。",
+                f"✅ 公开频道ID已更新为: {new_channel_id}\n\n注意：此更改仅在当前运行周期内生效，重启后需设置环境变量才能永久生效。",
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
         except ValueError:
@@ -1671,20 +1649,7 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
 
         try:
             new_group_id = int(text)
-            # 更新配置文件
-            import re
-
-            with open("config.py", "r") as f:
-                content = f.read()
-            content = re.sub(
-                r"PRIVATE_GROUP_ID = -?\d+",
-                f"PRIVATE_GROUP_ID = {new_group_id}",
-                content,
-            )
-            with open("config.py", "w") as f:
-                f.write(content)
-
-            # 更新内存中的配置
+            # 只更新内存中的配置（写入文件需要重载环境变量，不可靠）
             config.PRIVATE_GROUP_ID = new_group_id
 
             context.user_data.pop("waiting_for", None)
@@ -1693,7 +1658,7 @@ async def handle_waiting_input(update: Update, context: ContextTypes.DEFAULT_TYP
                 [InlineKeyboardButton("« 返回系统设置", callback_data="admin_settings")]
             ]
             await update.message.reply_text(
-                f"✅ 私密群组ID已更新为: {new_group_id}\n\n注意：此更改在内存中已生效，重启后将永久保存。",
+                f"✅ 私密群组ID已更新为: {new_group_id}\n\n注意：此更改仅在当前运行周期内生效，重启后需设置环境变量才能永久生效。",
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
         except ValueError:
@@ -2323,7 +2288,7 @@ async def view_shared_album(
                     except Exception as e:
                         logger.warning(f"删除消息 {msg_id} 失败: {e}")
 
-            # 启动后台任务删除所有消息
+            # 启动后台任务删除所有消息（事件循环会保留引用，无需手动跟踪）
             asyncio.create_task(delete_all_messages_after_delay())
 
     except Exception as e:
@@ -2358,6 +2323,9 @@ async def approve_review(
         return
 
     try:
+        # 先应答回调，避免Telegram显示持续加载状态
+        await query.answer()
+
         # 发布到公开频道
         user_info = (
             f"@{review['username']}" if review["username"] else review["first_name"]
@@ -2424,7 +2392,6 @@ async def approve_review(
         except Exception as e:
             logger.warning(f"编辑审核通过消息失败: {e}")
             await query.answer("✅ 已通过", show_alert=True)
-            await query.answer("✅ 已通过", show_alert=True)
 
     except Exception as e:
         logger.error(f"审核通过时出错: {e}", exc_info=True)
@@ -2453,6 +2420,9 @@ async def reject_review(
         return
 
     try:
+        # 先应答回调，避免Telegram显示持续加载状态
+        await query.answer()
+
         # 更新审核状态
         db.update_review_status(review_id, "rejected", admin_user.id)
 
@@ -2841,7 +2811,12 @@ async def show_admin_maintenance(update: Update, context: ContextTypes.DEFAULT_T
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """错误处理"""
-    logger.error(f"更新 {update} 导致错误: {context.error}", exc_info=True)
+    # 只记录安全的上下文信息，避免泄露用户数据
+    user_id = update.effective_user.id if update.effective_user else None
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    logger.error(
+        f"用户 {user_id} 在聊天 {chat_id} 导致错误: {context.error}", exc_info=True
+    )
 
 
 # ========== 主程序 ==========
