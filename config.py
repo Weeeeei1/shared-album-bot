@@ -47,7 +47,7 @@ LOG_FILE = os.environ.get("LOG_FILE", "bot.log")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
 # 版本号
-BOT_VERSION = "1.0.2"
+BOT_VERSION = "1.0.4"
 
 
 def validate_config():

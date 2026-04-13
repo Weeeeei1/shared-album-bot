@@ -3613,8 +3613,12 @@ async def show_admin_maintenance(update: Update, context: ContextTypes.DEFAULT_T
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """错误处理"""
     # 只记录安全的上下文信息，避免泄露用户数据
-    user_id = update.effective_user.id if update.effective_user else None
-    chat_id = update.effective_chat.id if update.effective_chat else None
+    if update and update.effective_user:
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id if update.effective_chat else None
+    else:
+        user_id = None
+        chat_id = None
     logger.error(
         f"用户 {user_id} 在聊天 {chat_id} 导致错误: {context.error}", exc_info=True
     )
